@@ -163,12 +163,13 @@ class DecisionClient:
             except Exception as e:
                 print(f"    [决策] {username} 异常: {e}")
         print(f"  [决策] 本轮 {ok_count}/{len(ALL_ACCOUNTS)} 个账号提交全0决策")
-        print(f"  [决策] 本轮 {ok_count}/{len(ALL_ACCOUNTS)} 个账号提交全0决策")
         return ok_count
 
 
 class Scheduler:
     def __init__(self, username, password, timeout=15):
+        self.username = username
+        self.password = password
         self.user_id = None
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
