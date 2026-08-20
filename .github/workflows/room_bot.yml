@@ -1,10 +1,11 @@
-name: Room Bot 定时任务
+name: Room Scheduler 定时任务
 
 on:
   schedule:
-    # UTC 时间, 每天 06:00 和 18:00 运行 (北京 14:00 / 次日 02:00)
-    # 按需修改 cron 表达式
-    - cron: '0 6,18 * * *'
+    # UTC 时间: 每 6 小时触发一次 (GitHub Actions 免费 job 上限 6 小时)
+    # 0:00 UTC = 北京 8:00, 6:00 UTC = 北京 14:00, 12:00 UTC = 北京 20:00, 18:00 UTC = 北京 次日 02:00
+    # 调度器会自动接管进行中的房间, 跨 job 无缝继续
+    - cron: '0 0,6,12,18 * * *'
   workflow_dispatch:   # 允许手动触发
 
 jobs:
@@ -20,10 +21,9 @@ jobs:
       - name: 安装依赖
         run: pip install requests
 
-      - name: 运行房间自动化
+      - name: 运行自动调度器
         env:
           BOT_USER: ${{ secrets.BOT_USER }}
           BOT_PASS: ${{ secrets.BOT_PASS }}
         run: |
-          python room_bot.py --login "$BOT_USER" "$BOT_PASS" --create --monitor \
-            --min-players 3 --max-wait 3600 --poll-interval 30
+          python room_scheduler.py --login "$BOT_USER" "$BOT_PASS"
