@@ -451,7 +451,7 @@ class Scheduler:
 
     def handle_room(self, room_id, room_level):
         """处理一个房间的完整生命周期(开始->翻期->结束).
-        进行中/进入竞赛/已结束 都算已开始, 直接进入翻期轮询.
+        用页面状态判断是否已开始, 不再用next_period测试(避免重复翻期).
         """
         level = LEVELS[room_level]
         n = level["full_n"]
@@ -461,21 +461,12 @@ class Scheduler:
         if players is None:
             print("  [接管] 房间不存在或不可访问", flush=True)
             return True
-        # 直接尝试翻期, 如果房间没开始 next_period 会返回 "0"
-        # 如果已开始, 翻期会正常工作
-        print("  [接管] 尝试翻期判断房间状态...", flush=True)
-        test_flip = self.next_period(room_id, room_level)
-        print(f"  [接管] 翻期测试返回: {test_flip}", flush=True)
-        if test_flip == "1":
-            # 翻期成功, 说明房间已开始且到了翻期时间
-            print("  [接管] 翻期成功, 房间已开始且到了翻期时间", flush=True)
-        elif test_flip == "0":
-            # 返回0=还没到翻期时间, 但房间已开始
-            print("  [接管] 房间已开始(还没到翻期时间), 进入翻期轮询", flush=True)
+        # 用页面状态判断是否已开始
+        if self.is_room_started(room_id, room_level):
+            print("  [接管] 房间已开始, 进入翻期轮询", flush=True)
         else:
-            # 其他返回=房间可能没开始, 无限重试start_exp直到开始或解散
+            # 房间未开始, 无限重试start_exp直到开始或解散
             print(f"  [接管] 房间未开始, 循环尝试start_exp", flush=True)
-            started = False
             while True:
                 if self._time_left() < 600:
                     print("  [结束] 接近job时限, 退出交给下个job", flush=True)
@@ -484,17 +475,13 @@ class Scheduler:
                 time.sleep(5)
                 if self.is_room_started(room_id, room_level):
                     print("  [确认] 房间已开始!", flush=True)
-                    started = True
                     break
-                # 检查房间是否已解散
                 players2, _ = self.room_status(room_id, room_level)
                 if players2 is None:
                     print("  [结束] 房间已解散", flush=True)
                     return False
                 print(f"  [重试] 未开始(人数{players2}), 15s后重试...", flush=True)
                 time.sleep(10)
-            if not started:
-                return False
         self.flip_loop(room_id, room_level, dc=dc)
         return True
 
@@ -541,14 +528,16 @@ class Scheduler:
             own = self.find_own_rooms()
             print(f"  找到 {len(own)} 个标记房间", flush=True)
             if own:
+                has_active = False
                 for lv, rid in own.items():
                     if not self.is_room_finished(rid, lv):
                         print(f"[接管] 场次{lv} 房号{rid} 未结束, 接管处理", flush=True)
                         self.handle_room(rid, lv)
+                        has_active = True
                         break
-                else:
-                    print("  现有房间均已结束, 可建新房", flush=True)
-                continue
+                if has_active:
+                    continue
+                print("  现有房间均已结束, 建新房", flush=True)
 
             # 3. 无进行中房间 -> 按时间计划建房
             room_level = primary if primary == secondary else self.pick_level(primary, secondary)
@@ -578,7 +567,12 @@ class Scheduler:
                 time.sleep(120)
                 continue
             print(f"  [建房] 成功! 房号{room_id}", flush=True)
-            self.handle_room(room_id, room_level)
+            # 新房: 等人满或40分钟强制开, 然后翻期结束
+            n = LEVELS[room_level]["full_n"]
+            started = self.wait_and_start(room_id, room_level, n, created_at)
+            if started:
+                dc = DecisionClient(self.timeout)
+                self.flip_loop(room_id, room_level, dc=dc)
 
     def pick_level(self, primary, secondary):
         """主/次/默认选择场次. 主满->试次, 次满->默认牛刀小试"""
