@@ -301,10 +301,11 @@ class Scheduler:
         try:
             resp = self._post("/room/addRoom", **params)
         except Exception as e:
-            print(f"  [建房] 异常: {e}")
+            print(f"  [建房] 异常: {e}", flush=True)
             return False, None
+        print(f"  [建房] addRoom 返回: {resp}", flush=True)
         if resp in ("0", "2", "3"):
-            print(f"  [建房] 失败: 返回码{resp}")
+            print(f"  [建房] 失败: 返回码{resp}", flush=True)
             return False, None
         # addRoom 返回码是成功标志, 不是房号, 需从列表查实际房号
         time.sleep(2)
@@ -313,28 +314,29 @@ class Scheduler:
             # 可能名字含特殊字符匹配失败, 尝试用标记搜索
             mark = name[:6] if len(name) > 6 else name
             room_id = self.find_own_rooms(mark=mark).get(room_level)
-        print(f"  [建房] 成功! 场次{room_level}({level['name']}) 满{n}开 房号{room_id} 名[{name}]")
+        print(f"  [建房] 成功! 场次{room_level}({level['name']}) 满{n}开 房号{room_id} 名[{name}]", flush=True)
         return True, room_id
 
     def wait_and_start(self, room_id, room_level, n, created_at):
         """等满n人 或 到40min强制开. 返回是否成功开始"""
         force_time = created_at + dt.timedelta(minutes=FORCE_START_AFTER)
-        print(f"  [等待] 房号{room_id} 满{n}人开, 未满则 {force_time.strftime('%H:%M')} 强制开")
+        print(f"  [等待] 房号{room_id} 满{n}人开, 未满则 {force_time.strftime('%H:%M')} 强制开", flush=True)
         while self._now() < force_time:
             players, maxp = self.room_status(room_id, room_level)
             if players is None:
+                print(f"  [检测] 获取人数失败, {POLL_INTERVAL}s后重试", flush=True)
                 time.sleep(POLL_INTERVAL)
                 continue
-            print(f"  [检测] {self._now().strftime('%H:%M:%S')} 人数 {players}/{maxp} (目标{n})")
+            print(f"  [检测] {self._now().strftime('%H:%M:%S')} 人数 {players}/{maxp} (目标{n})", flush=True)
             if players >= n:
-                print(f"  [触发] 已满{n}人, 立即开始!")
+                print(f"  [触发] 已满{n}人, 立即开始!", flush=True)
                 resp = self.start_exp(room_id, room_level)
-                print(f"  [开始] 返回码: {resp}")
+                print(f"  [开始] 返回码: {resp}", flush=True)
                 return resp == "1"
             time.sleep(POLL_INTERVAL)
-        print(f"  [强制] 到点未满{n}人, 强制开始")
+        print(f"  [强制] 到点未满{n}人, 强制开始", flush=True)
         resp = self.start_exp(room_id, room_level)
-        print(f"  [开始] 返回码: {resp}")
+        print(f"  [开始] 返回码: {resp}", flush=True)
         return resp == "1"
 
     def flip_loop(self, room_id, room_level, start_time=None, dc=None):
@@ -390,15 +392,15 @@ class Scheduler:
             created_at = self._now() - dt.timedelta(minutes=FORCE_START_AFTER)
         # 检查是否已开始 (若已过强制时间则直接翻期阶段)
         players, maxp = self.room_status(room_id, room_level)
-        print(f"  [接管] 房号{room_id} 场次{room_level}({level['name']}) 当前 {players}/{maxp}")
+        print(f"  [接管] 房号{room_id} 场次{room_level}({level['name']}) 当前 {players}/{maxp}", flush=True)
         if players is None:
-            print("  [接管] 房间不存在或不可访问")
+            print("  [接管] 房间不存在或不可访问", flush=True)
             return True
         started = self.start_exp(room_id, room_level)
         if started == "1":
-            print("  [接管] 房间已开始, 进入翻期循环")
+            print("  [接管] 房间已开始, 进入翻期循环", flush=True)
         else:
-            print(f"  [接管] 尝试开始返回{started}, 进入等待/强制开始流程")
+            print(f"  [接管] 尝试开始返回{started}, 进入等待/强制开始流程", flush=True)
             ok = self.wait_and_start(room_id, room_level, n, created_at)
             if not ok:
                 return False
@@ -409,51 +411,58 @@ class Scheduler:
         if not self.login():
             return False
         start_ts = time.time()
-        print(f"=== 调度器启动 {self._now().strftime('%Y-%m-%d %H:%M:%S')} (北京) ===")
+        print(f"=== 调度器启动 {self._now().strftime('%Y-%m-%d %H:%M:%S')} (北京) ===", flush=True)
 
         while True:
             # 检查是否接近job时限, 提前退出交给下个job
+            elapsed_min = (time.time() - start_ts) / 60
             if time.time() - start_ts > MAX_JOB_RUNTIME:
-                print("=== 接近job时限(6h), 退出, 下个job将接管 ===")
+                print("=== 接近job时限(6h), 退出, 下个job将接管 ===", flush=True)
                 return True
 
             # 1. 先检查是否有进行中的房间需要接管
+            now = self._now()
+            print(f"\n[{now.strftime('%H:%M:%S')}] 主循环 已运行{elapsed_min:.0f}min, 检查房间...", flush=True)
             own = self.find_own_rooms()
+            print(f"  找到 {len(own)} 个标记房间: {own}", flush=True)
             if own:
                 for lv, rid in own.items():
                     if not self.is_room_finished(rid, lv):
-                        print(f"\n[接管] 检测到进行中的房间 场次{lv} 房号{rid}")
+                        print(f"\n[接管] 检测到进行中的房间 场次{lv} 房号{rid}", flush=True)
                         self.handle_room(rid, lv)
                         # 处理完一个后重新扫描
                         break
                 else:
-                    print("  现有房间均已结束")
+                    print("  现有房间均已结束", flush=True)
                 continue
 
             # 2. 无进行中房间 -> 按计划建房
             plan = self.plan_level()
             now = self._now()
             if plan is None:
-                print(f"\n[{now.strftime('%H:%M')}] 已过{START_LIMIT_HOUR}点, 收工")
+                print(f"\n[{now.strftime('%H:%M')}] 已过{START_LIMIT_HOUR}点, 收工", flush=True)
                 return True
             primary, secondary = plan
             print(f"\n[{now.strftime('%H:%M')}] 计划: 主{LEVELS[primary]['name']} "
-                  f"次{LEVELS[secondary]['name']}")
+                  f"次{LEVELS[secondary]['name']}", flush=True)
             room_level = primary if primary == secondary else self.pick_level(primary, secondary)
+            print(f"  选定场次: {room_level}({LEVELS[room_level]['name']})", flush=True)
 
             if dry_run:
                 name = ROOM_NAME_TPL.format(
                     n=LEVELS[room_level]["full_n"],
                     time=(now + dt.timedelta(minutes=FORCE_START_AFTER)).strftime("%H:%M"))
-                print(f"  [DRY] 将建房间: {name} (4季度 20min 密码123)")
+                print(f"  [DRY] 将建房间: {name} (4季度 20min 密码123)", flush=True)
                 return True
 
+            print(f"  [建房] 开始建场次{room_level}房间...", flush=True)
             created_at = self._now()
             ok, room_id = self.create_room(room_level, created_at)
             if not ok:
-                print("  [建房] 失败, 2分钟后重试")
+                print("  [建房] 失败, 2分钟后重试", flush=True)
                 time.sleep(120)
                 continue
+            print(f"  [建房] 成功! 房号{room_id}", flush=True)
             self.handle_room(room_id, room_level, created_at)
 
     def pick_level(self, primary, secondary):
