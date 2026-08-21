@@ -426,8 +426,7 @@ class Scheduler:
 
     def handle_room(self, room_id, room_level):
         """处理一个房间的完整生命周期(开始->翻期->结束).
-        用页面状态文字判断房间是否已开始: '进入'=已开始, '进行中'=未开始.
-        若房间无法开始, 持续重试直到系统自动解散(约1小时), 再返回让run()建新房.
+        进行中/进入竞赛/已结束 都算已开始, 直接进入翻期轮询.
         """
         level = LEVELS[room_level]
         n = level["full_n"]
@@ -437,42 +436,22 @@ class Scheduler:
         if players is None:
             print("  [接管] 房间不存在或不可访问", flush=True)
             return True
-        # 用页面状态判断是否已开始
-        if self.is_room_started(room_id, room_level):
-            print("  [接管] 房间已开始(页面显示'进入'), 进入翻期轮询", flush=True)
+        # 直接尝试翻期, 如果房间没开始 next_period 会返回 "0"
+        # 如果已开始, 翻期会正常工作
+        print("  [接管] 尝试翻期判断房间状态...", flush=True)
+        test_flip = self.next_period(room_id, room_level)
+        print(f"  [接管] 翻期测试返回: {test_flip}", flush=True)
+        if test_flip == "1":
+            # 翻期成功, 说明房间已开始且到了翻期时间
+            print("  [接管] 翻期成功, 房间已开始且到了翻期时间", flush=True)
+        elif test_flip == "0":
+            # 返回0=还没到翻期时间, 但房间已开始
+            print("  [接管] 房间已开始(还没到翻期时间), 进入翻期轮询", flush=True)
         else:
-            print(f"  [接管] 房间未开始(页面显示'进行中'), 尝试开始", flush=True)
+            # 其他返回=房间可能没开始, 尝试开始
+            print(f"  [接管] 房间未开始, 尝试start_exp", flush=True)
             self.start_exp(room_id, room_level)
             time.sleep(3)
-            # 再次检查页面状态
-            if self.is_room_started(room_id, room_level):
-                print("  [接管] 房间已开始(验证通过), 进入翻期轮询", flush=True)
-            else:
-                print(f"  [接管] 页面仍显示未开始, 进入等待/强制开始流程", flush=True)
-                ok = self.wait_and_start(room_id, room_level, n, self._now())
-                if not ok:
-                    # 开始失败, 持续重试直到房间被系统解散
-                    print(f"  [失败] 房间开始失败, 持续重试等待系统解散...", flush=True)
-                    while True:
-                        if self._time_left() < 600:
-                            print("  [失败] 接近job时限, 退出交给下个job", flush=True)
-                            return False
-                        time.sleep(60)
-                        # 检查房间是否已解散
-                        players, _ = self.room_status(room_id, room_level)
-                        if players is None:
-                            print("  [失败] 房间已解散, 可建新房", flush=True)
-                            return False
-                        # 检查页面状态
-                        if self.is_room_started(room_id, room_level):
-                            print(f"  [重试] 房间已开始!", flush=True)
-                            break
-                        # 再次尝试开始
-                        print(f"  [重试] 再次尝试开始房间 ({players}/{maxp})", flush=True)
-                        self.start_exp(room_id, room_level)
-                        time.sleep(3)
-                    if players is None:
-                        return False
         self.flip_loop(room_id, room_level, dc=dc)
         return True
 
