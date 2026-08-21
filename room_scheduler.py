@@ -371,19 +371,22 @@ class Scheduler:
             print(f"  [检测] {self._now().strftime('%H:%M:%S')} 人数 {players}/{maxp} (目标{n})", flush=True)
             if players >= n:
                 print(f"  [触发] 已满{n}人, 立即开始!", flush=True)
-                self.start_exp(room_id, room_level)
-                # 循环等待房间真正开始
-                for attempt in range(10):
+                while True:
+                    if self._time_left() < 600:
+                        print("  [结束] 接近job时限, 退出交给下个job", flush=True)
+                        return False
+                    self.start_exp(room_id, room_level)
                     time.sleep(5)
                     if self.is_room_started(room_id, room_level):
-                        print(f"  [确认] 房间已开始 (第{attempt+1}次检查)", flush=True)
+                        print("  [确认] 房间已开始!", flush=True)
                         return True
-                    if self._now() >= force_time:
-                        break
-                    print(f"  [重试] 第{attempt+1}次检查未开始, 继续等待...", flush=True)
-                # 检查是否已过强制时间
-                if self._now() >= force_time:
-                    break
+                    # 检查房间是否已被解散
+                    players2, _ = self.room_status(room_id, room_level)
+                    if players2 is None:
+                        print("  [结束] 房间已解散", flush=True)
+                        return False
+                    print(f"  [重试] 未开始, 10s后重试...", flush=True)
+                    time.sleep(10)
             time.sleep(POLL_INTERVAL)
         print(f"  [强制] 到点未满{n}人, 强制开始", flush=True)
         while True:
