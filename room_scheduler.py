@@ -195,10 +195,7 @@ class Scheduler:
             enc = "&".join(f"{k}={urllib.parse.quote(str(v), safe='')}" for k, v in params.items())
             url += "?" + enc
         r = self.session.get(url, timeout=self.timeout)
-        if r.apparent_encoding:
-            r.encoding = r.apparent_encoding
-        else:
-            r.encoding = "gbk"
+        r.encoding = "utf-8"
         return r.text
 
     def login(self):
