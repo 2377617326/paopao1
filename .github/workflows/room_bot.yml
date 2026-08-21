@@ -2,11 +2,14 @@ name: Room Scheduler 定时任务
 
 on:
   schedule:
-    # UTC 时间: 每 6 小时触发一次 (GitHub Actions 免费 job 上限 6 小时)
-    # 0:00 UTC = 北京 8:00, 6:00 UTC = 北京 14:00, 12:00 UTC = 北京 20:00, 18:00 UTC = 北京 次日 02:00
-    # 调度器会自动接管进行中的房间, 跨 job 无缝继续
-    - cron: '0 0,6,12,18 * * *'
-  workflow_dispatch:   # 允许手动触发
+    # UTC 时间: 每 2 小时触发一次
+    # 新job启动时自动取消旧job并接管房间, 无空档
+    - cron: '0 */2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: room-bot
+  cancel-in-progress: true
 
 jobs:
   run-bot:
