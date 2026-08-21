@@ -372,13 +372,29 @@ class Scheduler:
             if players >= n:
                 print(f"  [触发] 已满{n}人, 立即开始!", flush=True)
                 self.start_exp(room_id, room_level)
-                time.sleep(3)
-                return self.is_room_started(room_id, room_level)
+                # 循环等待房间真正开始
+                for attempt in range(10):
+                    time.sleep(5)
+                    if self.is_room_started(room_id, room_level):
+                        print(f"  [确认] 房间已开始 (第{attempt+1}次检查)", flush=True)
+                        return True
+                    if self._now() >= force_time:
+                        break
+                    print(f"  [重试] 第{attempt+1}次检查未开始, 继续等待...", flush=True)
+                # 检查是否已过强制时间
+                if self._now() >= force_time:
+                    break
             time.sleep(POLL_INTERVAL)
         print(f"  [强制] 到点未满{n}人, 强制开始", flush=True)
         self.start_exp(room_id, room_level)
-        time.sleep(3)
-        return self.is_room_started(room_id, room_level)
+        # 循环等待房间真正开始
+        for attempt in range(10):
+            time.sleep(5)
+            if self.is_room_started(room_id, room_level):
+                print(f"  [确认] 房间已开始 (强制, 第{attempt+1}次检查)", flush=True)
+                return True
+            print(f"  [重试] 强制开始后第{attempt+1}次检查未开始, 继续等待...", flush=True)
+        return False
 
     def flip_loop(self, room_id, room_level, dc=None):
         """翻期循环: 每30s轮询 next_period(), 服务器返回"1"就翻期. 翻完检查结束"""
@@ -453,7 +469,13 @@ class Scheduler:
             # 其他返回=房间可能没开始, 尝试开始
             print(f"  [接管] 房间未开始, 尝试start_exp", flush=True)
             self.start_exp(room_id, room_level)
-            time.sleep(3)
+            # 循环等待房间真正开始
+            for attempt in range(10):
+                time.sleep(5)
+                if self.is_room_started(room_id, room_level):
+                    print(f"  [确认] 房间已开始 (第{attempt+1}次检查)", flush=True)
+                    break
+                print(f"  [重试] 第{attempt+1}次检查未开始, 继续等待...", flush=True)
         self.flip_loop(room_id, room_level, dc=dc)
         return True
 
