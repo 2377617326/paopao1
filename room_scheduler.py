@@ -473,16 +473,24 @@ class Scheduler:
             # 返回0=还没到翻期时间, 但房间已开始
             print("  [接管] 房间已开始(还没到翻期时间), 进入翻期轮询", flush=True)
         else:
-            # 其他返回=房间可能没开始, 尝试开始
-            print(f"  [接管] 房间未开始, 尝试start_exp", flush=True)
-            self.start_exp(room_id, room_level)
-            # 循环等待房间真正开始
-            for attempt in range(10):
+            # 其他返回=房间可能没开始, 无限重试start_exp直到开始或解散
+            print(f"  [接管] 房间未开始, 循环尝试start_exp", flush=True)
+            while True:
+                if self._time_left() < 600:
+                    print("  [结束] 接近job时限, 退出交给下个job", flush=True)
+                    return False
+                self.start_exp(room_id, room_level)
                 time.sleep(5)
                 if self.is_room_started(room_id, room_level):
-                    print(f"  [确认] 房间已开始 (第{attempt+1}次检查)", flush=True)
+                    print("  [确认] 房间已开始!", flush=True)
                     break
-                print(f"  [重试] 第{attempt+1}次检查未开始, 继续等待...", flush=True)
+                # 检查房间是否已解散
+                players2, _ = self.room_status(room_id, room_level)
+                if players2 is None:
+                    print("  [结束] 房间已解散", flush=True)
+                    return False
+                print(f"  [重试] 未开始(人数{players2}), 15s后重试...", flush=True)
+                time.sleep(10)
         self.flip_loop(room_id, room_level, dc=dc)
         return True
 
@@ -553,7 +561,16 @@ class Scheduler:
             created_at = self._now()
             ok, room_id = self.create_room(room_level, created_at)
             if not ok:
-                print("  [建房] 失败, 2分钟后重试", flush=True)
+                # 建房失败, 可能已有活跃房间, 先检查
+                own = self.find_own_rooms()
+                if own:
+                    print(f"  [建房] 失败但发现 {len(own)} 个已有房间, 接管处理", flush=True)
+                    for lv, rid in own.items():
+                        if not self.is_room_finished(rid, lv):
+                            self.handle_room(rid, lv)
+                            break
+                    continue
+                print("  [建房] 失败且无已有房间, 2分钟后重试", flush=True)
                 time.sleep(120)
                 continue
             print(f"  [建房] 成功! 房号{room_id}", flush=True)
