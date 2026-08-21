@@ -9,8 +9,8 @@
   12:00-14:00  只建 牛刀小试
   14:00-17:00  主 锋芒毕露 次 牛刀小试
   17:00-20:00  主 群雄争霸 次 锋芒毕露
-  20:00-23:00  默认建 牛刀小试
-  23:00后      不再新建, 等最后一局结束后收工
+  20:00-22:00  默认建 牛刀小试
+  22:00后      不再新建, 等最后一局结束后收工
 
 建房参数: 4季度, 每周期20分钟, 密码123, 其余默认
 房间名: 尔尔定时比赛q群5342744003（满{n}开）不满{HH:MM}开
@@ -21,9 +21,9 @@
 这样即使 GitHub Actions 每6小时重启 job, 也能无缝继续。
 
 用法:
-  python room_scheduler.py --login beat-14 214
-  python room_scheduler.py --login beat-14 214 --once          # 只跑一轮/接管一轮后退出
-  python room_scheduler.py --login beat-14 214 --dry-run      # 只打印计划不操作
+  python room_scheduler.py --login 自动房间-1 321
+  python room_scheduler.py --login 自动房间-1 321 --once
+  python room_scheduler.py --login 自动房间-1 321 --dry-run
 """
 import argparse
 import datetime as dt
@@ -57,7 +57,7 @@ TOTAL_PERIOD = 4          # 4季度
 PERIOD_LENGTH = 20        # 每周期20分钟 (翻期间隔)
 ROOM_PASSWORD = "123"
 FORCE_START_AFTER = 40    # 建房后40分钟强制开始
-START_LIMIT_HOUR = 23     # 23点后不再新建房间
+START_LIMIT_HOUR = 22     # 22点后不再新建房间
 POLL_INTERVAL = 15        # 轮询秒数
 MAX_JOB_RUNTIME = 5.9 * 60 * 60  # GitHub Actions job 限6小时, 留余量
 FLIP_RETRY = 3            # 翻期失败重试次数
@@ -65,12 +65,10 @@ FLIP_RETRY = 3            # 翻期失败重试次数
 # 9001 决策软件端口
 BASE_9001 = os.environ.get("BASE_9001", "http://121.42.10.114:9001")
 
-# 所有参赛账号: (用户名, 密码)  密码规则 = "2" + 用户名数字部分
-# beat-12 为房主账号
+# 参赛账号: (用户名, 密码)
+# 唯一账号: 自动房间-1
 ALL_ACCOUNTS = [
-    ("beat-12", "212"), ("beat-13", "213"), ("beat-14", "214"),
-    ("beat-02", "202"), ("beat-03", "203"), ("beat-04", "204"),
-    ("beat-05", "205"), ("beat-06", "206"), ("beat-07", "207"), ("beat-08", "208"),
+    ("自动房间-1", "321"),
 ]
 
 
