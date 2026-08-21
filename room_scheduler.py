@@ -217,7 +217,7 @@ class Scheduler:
             print(f"  [清理] 异常: {e}")
 
     def find_own_rooms(self, mark=None):
-        """扫描所有场次, 返回 {room_level: room_id} 自己的房间(名字含标记)"""
+        """扫描所有场次, 返回 {room_level: room_id} 自己的房间(名字含标记 且 房主是自己)"""
         mark = mark or ROOM_NAME_MARK
         found = {}
         for lv in LEVELS:
@@ -225,6 +225,13 @@ class Scheduler:
                 html = self._get("/room/gotoAddRoom", userId=self.user_id, roomLevelId=lv)
                 for block in re.split(r'<div class="col-11 px-2 mb-3 room-list-item">', html):
                     if mark in block:
+                        # 检查房主是否是自己
+                        owner_match = re.search(r'房主名字[：:]\s*(\S+)', block)
+                        if owner_match:
+                            owner = owner_match.group(1)
+                            # 房主名字可能是用户名或uid, 都检查
+                            if owner != self.username and owner != str(self.user_id):
+                                continue  # 不是自己的房间, 跳过
                         m = re.search(r"gotoJoinRoom\('\d+','\d+','(\d+)'\)", block)
                         if m:
                             found[lv] = m.group(1)
