@@ -348,12 +348,14 @@ class Scheduler:
             print(f"  [建房] 失败: 返回码{resp}", flush=True)
             return False, None
         # addRoom 返回码是成功标志, 不是房号, 需从列表查实际房号
-        time.sleep(2)
-        room_id = self.find_own_rooms(mark=name).get(room_level)
+        time.sleep(3)
+        room_id = self.find_own_rooms().get(room_level)
         if room_id is None:
-            # 可能名字含特殊字符匹配失败, 尝试用标记搜索
-            mark = name[:6] if len(name) > 6 else name
-            room_id = self.find_own_rooms(mark=mark).get(room_level)
+            time.sleep(3)
+            room_id = self.find_own_rooms().get(room_level)
+        if room_id is None:
+            print(f"  [建房] 建房成功但找不到房号!", flush=True)
+            return False, None
         print(f"  [建房] 成功! 场次{room_level}({level['name']}) 满{n}开 房号{room_id} 名[{name}]", flush=True)
         return True, room_id
 
