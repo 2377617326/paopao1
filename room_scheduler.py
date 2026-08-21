@@ -356,7 +356,7 @@ class Scheduler:
         return True, room_id
 
     def wait_and_start(self, room_id, room_level, n, created_at):
-        """等满n人 或 到40min强制开. 用页面状态文字判断是否成功开始"""
+        """等满n人 或 到40min强制开. 用页面状态文字判断是否成功开始. 不检查时限,必须等到开始或解散"""
         force_time = created_at + dt.timedelta(minutes=FORCE_START_AFTER)
         print(f"  [等待] 房号{room_id} 满{n}人开, 未满则 {force_time.strftime('%H:%M')} 强制开", flush=True)
         while self._now() < force_time:
@@ -369,15 +369,11 @@ class Scheduler:
             if players >= n:
                 print(f"  [触发] 已满{n}人, 立即开始!", flush=True)
                 while True:
-                    if self._time_left() < 600:
-                        print("  [结束] 接近job时限, 退出交给下个job", flush=True)
-                        return False
                     self.start_exp(room_id, room_level)
                     time.sleep(5)
                     if self.is_room_started(room_id, room_level):
                         print("  [确认] 房间已开始!", flush=True)
                         return True
-                    # 检查房间是否已被解散
                     players2, _ = self.room_status(room_id, room_level)
                     if players2 is None:
                         print("  [结束] 房间已解散", flush=True)
@@ -387,15 +383,11 @@ class Scheduler:
             time.sleep(POLL_INTERVAL)
         print(f"  [强制] 到点未满{n}人, 强制开始", flush=True)
         while True:
-            if self._time_left() < 600:
-                print("  [结束] 接近job时限, 退出交给下个job", flush=True)
-                return False
             self.start_exp(room_id, room_level)
             time.sleep(5)
             if self.is_room_started(room_id, room_level):
                 print("  [确认] 房间已开始!", flush=True)
                 return True
-            # 检查房间是否已被系统解散
             players, maxp = self.room_status(room_id, room_level)
             if players is None:
                 print("  [结束] 房间已解散", flush=True)
@@ -465,12 +457,9 @@ class Scheduler:
         if self.is_room_started(room_id, room_level):
             print("  [接管] 房间已开始, 进入翻期轮询", flush=True)
         else:
-            # 房间未开始, 无限重试start_exp直到开始或解散
+            # 房间未开始, 无限重试start_exp直到开始或解散(不检查时限)
             print(f"  [接管] 房间未开始, 循环尝试start_exp", flush=True)
             while True:
-                if self._time_left() < 600:
-                    print("  [结束] 接近job时限, 退出交给下个job", flush=True)
-                    return False
                 self.start_exp(room_id, room_level)
                 time.sleep(5)
                 if self.is_room_started(room_id, room_level):
