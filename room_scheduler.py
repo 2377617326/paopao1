@@ -401,6 +401,7 @@ class Scheduler:
     def handle_room(self, room_id, room_level):
         """处理一个房间的完整生命周期(开始->翻期->结束).
         接管后直接轮询翻期, 不需要知道房间何时开始.
+        若房间无法开始, 持续重试直到系统自动解散(约1小时), 再返回让run()建新房.
         """
         level = LEVELS[room_level]
         n = level["full_n"]
@@ -421,9 +422,28 @@ class Scheduler:
             print(f"  [接管] 尝试开始返回{started}, 进入等待/强制开始流程", flush=True)
             ok = self.wait_and_start(room_id, room_level, n, self._now())
             if not ok:
-                print(f"  [失败] 房间开始失败, 清理并退出", flush=True)
-                self.room_clean(room_level)
-                return False
+                # 开始失败, 持续重试直到房间被系统解散
+                print(f"  [失败] 房间开始失败, 持续重试等待系统解散...", flush=True)
+                while True:
+                    if self._time_left() < 600:
+                        print("  [失败] 接近job时限, 退出交给下个job", flush=True)
+                        return False
+                    time.sleep(60)
+                    # 检查房间是否已解散
+                    players, _ = self.room_status(room_id, room_level)
+                    if players is None:
+                        print("  [失败] 房间已解散, 可建新房", flush=True)
+                        return False
+                    # 再次尝试开始
+                    print(f"  [重试] 再次尝试开始房间 ({players}/{maxp})", flush=True)
+                    retry = self.start_exp(room_id, room_level)
+                    if retry == "1" or "500" in str(retry):
+                        print(f"  [重试] 开始成功!", flush=True)
+                        break
+                # 如果是重试成功的, 继续走翻期流程
+                # 如果是房间解散的, 已return False
+                if players is None:
+                    return False
         self.flip_loop(room_id, room_level, dc=dc)
         return True
 
