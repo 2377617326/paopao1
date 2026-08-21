@@ -172,6 +172,11 @@ class Scheduler:
         self.session = requests.Session()
         self.session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
         self.timeout = timeout
+        self.start_ts = time.time()
+
+    def _time_left(self):
+        """返回job剩余秒数, 负数表示超时"""
+        return MAX_JOB_RUNTIME - (time.time() - self.start_ts)
 
     def _now(self):
         return dt.datetime.utcnow() + TZ_OFFSET
@@ -351,6 +356,9 @@ class Scheduler:
         """翻期循环: 每30s轮询 next_period(), 服务器返回"1"就翻期. 翻完检查结束"""
         total_flips = TOTAL_PERIOD - 1
         for i in range(total_flips):
+            if self._time_left() < 600:
+                print("  [翻期] 接近job时限, 退出交给下个job", flush=True)
+                return False
             next_period_num = i + 2
             # 翻期前提交全0决策
             if dc:
@@ -359,6 +367,9 @@ class Scheduler:
             # 轮询等待服务器可以翻期
             print(f"  [翻期] 轮询等待第{next_period_num}期...", flush=True)
             while True:
+                if self._time_left() < 600:
+                    print("  [翻期] 接近job时限, 退出交给下个job", flush=True)
+                    return False
                 resp = self.next_period(room_id, room_level)
                 if resp == "1":
                     print(f"  [翻期] 第{next_period_num}期 翻期成功!", flush=True)
@@ -376,6 +387,9 @@ class Scheduler:
             dc.submit_all(room_id, TOTAL_PERIOD)
         print("  [结束] 全部季度完成, 轮询等待结束...", flush=True)
         while True:
+            if self._time_left() < 600:
+                print("  [结束] 接近job时限, 退出交给下个job", flush=True)
+                return False
             resp = self.finish_exp(room_id, room_level)
             if resp == "1":
                 print("  [结束] 实验已结束!", flush=True)
@@ -414,13 +428,13 @@ class Scheduler:
     def run(self, dry_run=False):
         if not self.login():
             return False
-        start_ts = time.time()
+        self.start_ts = time.time()
         print(f"=== 调度器启动 {self._now().strftime('%Y-%m-%d %H:%M:%S')} (北京) ===", flush=True)
 
         while True:
             # 检查是否接近job时限, 提前退出交给下个job
-            elapsed_min = (time.time() - start_ts) / 60
-            if time.time() - start_ts > MAX_JOB_RUNTIME:
+            elapsed_min = (time.time() - self.start_ts) / 60
+            if self._time_left() < 600:
                 print("=== 接近job时限(6h), 退出, 下个job将接管 ===", flush=True)
                 return True
 
