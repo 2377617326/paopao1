@@ -423,31 +423,46 @@ class Scheduler:
                 print("=== 接近job时限(6h), 退出, 下个job将接管 ===", flush=True)
                 return True
 
-            # 1. 先检查是否有进行中的房间需要接管
             now = self._now()
-            print(f"\n[{now.strftime('%H:%M:%S')}] 主循环 已运行{elapsed_min:.0f}min, 检查房间...", flush=True)
+            print(f"\n[{now.strftime('%H:%M:%S')}] 主循环 已运行{elapsed_min:.0f}min", flush=True)
+
+            # 1. 先检查时间, 决定建房类型
+            plan = self.plan_level()
+            if plan is None:
+                # 已过22点, 只处理未结束的房间
+                print(f"[{now.strftime('%H:%M')}] 已过{START_LIMIT_HOUR}点, 检查未结束房间...", flush=True)
+                own = self.find_own_rooms()
+                if own:
+                    for lv, rid in own.items():
+                        if not self.is_room_finished(rid, lv):
+                            print(f"[接管] 场次{lv} 房号{rid} 未结束, 继续处理", flush=True)
+                            self.handle_room(rid, lv)
+                            break
+                    else:
+                        print("所有房间已结束, 收工", flush=True)
+                        return True
+                    continue
+                else:
+                    print("无标记房间, 收工", flush=True)
+                    return True
+
+            primary, secondary = plan
+            print(f"  计划: 主{LEVELS[primary]['name']} 次{LEVELS[secondary]['name']}", flush=True)
+
+            # 2. 检查是否有自己是房主的未完成房间需要接管
             own = self.find_own_rooms()
-            print(f"  找到 {len(own)} 个标记房间: {own}", flush=True)
+            print(f"  找到 {len(own)} 个标记房间", flush=True)
             if own:
                 for lv, rid in own.items():
                     if not self.is_room_finished(rid, lv):
-                        print(f"\n[接管] 检测到进行中的房间 场次{lv} 房号{rid}", flush=True)
+                        print(f"[接管] 场次{lv} 房号{rid} 未结束, 接管处理", flush=True)
                         self.handle_room(rid, lv)
-                        # 处理完一个后重新扫描
                         break
                 else:
-                    print("  现有房间均已结束", flush=True)
+                    print("  现有房间均已结束, 可建新房", flush=True)
                 continue
 
-            # 2. 无进行中房间 -> 按计划建房
-            plan = self.plan_level()
-            now = self._now()
-            if plan is None:
-                print(f"\n[{now.strftime('%H:%M')}] 已过{START_LIMIT_HOUR}点, 收工", flush=True)
-                return True
-            primary, secondary = plan
-            print(f"\n[{now.strftime('%H:%M')}] 计划: 主{LEVELS[primary]['name']} "
-                  f"次{LEVELS[secondary]['name']}", flush=True)
+            # 3. 无进行中房间 -> 按时间计划建房
             room_level = primary if primary == secondary else self.pick_level(primary, secondary)
             print(f"  选定场次: {room_level}({LEVELS[room_level]['name']})", flush=True)
 
@@ -455,7 +470,7 @@ class Scheduler:
                 name = ROOM_NAME_TPL.format(
                     n=LEVELS[room_level]["full_n"],
                     time=(now + dt.timedelta(minutes=FORCE_START_AFTER)).strftime("%H:%M"))
-                print(f"  [DRY] 将建房间: {name} (4季度 20min 密码123)", flush=True)
+                print(f"  [DRY] 将建房间: {name} (4季度 20min)", flush=True)
                 return True
 
             print(f"  [建房] 开始建场次{room_level}房间...", flush=True)
