@@ -271,6 +271,17 @@ class Scheduler:
     def start_exp(self, room_id, room_level):
         return self._post("/room/startRoomExp", type="1", roomId=room_id, userId=self.user_id)
 
+    def start_exp_verified(self, room_id, room_level):
+        """调用 start_exp 并验证是否真正开始. 返回 True=真正开始, False=未开始"""
+        resp = self.start_exp(room_id, room_level)
+        if resp != "1":
+            return False
+        # 等3秒后再调一次, 已开始的房间会返回500
+        time.sleep(3)
+        resp2 = self.start_exp(room_id, room_level)
+        # 已开始的房间再调start返回500(JSON含"status":500)
+        return "500" in str(resp2)
+
     def next_period(self, room_id, room_level):
         return self._post("/room/startRoomExp", type="2", roomId=room_id, userId=self.user_id)
 
@@ -343,14 +354,10 @@ class Scheduler:
             print(f"  [检测] {self._now().strftime('%H:%M:%S')} 人数 {players}/{maxp} (目标{n})", flush=True)
             if players >= n:
                 print(f"  [触发] 已满{n}人, 立即开始!", flush=True)
-                resp = self.start_exp(room_id, room_level)
-                print(f"  [开始] 返回码: {resp}", flush=True)
-                return resp == "1"
+                return self.start_exp_verified(room_id, room_level)
             time.sleep(POLL_INTERVAL)
         print(f"  [强制] 到点未满{n}人, 强制开始", flush=True)
-        resp = self.start_exp(room_id, room_level)
-        print(f"  [开始] 返回码: {resp}", flush=True)
-        return resp == "1"
+        return self.start_exp_verified(room_id, room_level)
 
     def flip_loop(self, room_id, room_level, dc=None):
         """翻期循环: 每30s轮询 next_period(), 服务器返回"1"就翻期. 翻完检查结束"""
@@ -411,15 +418,11 @@ class Scheduler:
         if players is None:
             print("  [接管] 房间不存在或不可访问", flush=True)
             return True
-        # 尝试开始房间
-        started = self.start_exp(room_id, room_level)
-        if started == "1":
-            print("  [接管] 房间已开始, 进入翻期轮询", flush=True)
-        elif "500" in str(started) or "error" in str(started).lower():
-            # 500 = 房间已经开始了(重复调用start会500)
-            print(f"  [接管] start返回服务器错误, 假设已开始, 直接进入翻期轮询", flush=True)
+        # 用验证方式尝试开始房间
+        if self.start_exp_verified(room_id, room_level):
+            print("  [接管] 房间已开始(验证通过), 进入翻期轮询", flush=True)
         else:
-            print(f"  [接管] 尝试开始返回{started}, 进入等待/强制开始流程", flush=True)
+            print(f"  [接管] 房间未开始, 进入等待/强制开始流程", flush=True)
             ok = self.wait_and_start(room_id, room_level, n, self._now())
             if not ok:
                 # 开始失败, 持续重试直到房间被系统解散
@@ -434,10 +437,9 @@ class Scheduler:
                     if players is None:
                         print("  [失败] 房间已解散, 可建新房", flush=True)
                         return False
-                    # 再次尝试开始
+                    # 再次尝试开始(用验证方式)
                     print(f"  [重试] 再次尝试开始房间 ({players}/{maxp})", flush=True)
-                    retry = self.start_exp(room_id, room_level)
-                    if retry == "1" or "500" in str(retry):
+                    if self.start_exp_verified(room_id, room_level):
                         print(f"  [重试] 开始成功!", flush=True)
                         break
                 # 如果是重试成功的, 继续走翻期流程
