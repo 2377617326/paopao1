@@ -228,7 +228,7 @@ class Scheduler:
                 for block in re.split(r'<div class="col-11 px-2 mb-3 room-list-item">', html):
                     if mark not in block:
                         continue
-                    owner_match = re.search(r'房主名字[：:]\s*(\S+)', block)
+                    owner_match = re.search(r'房主名字[：:]\s*([^<\s]+)', block)
                     if not owner_match:
                         continue
                     owner = owner_match.group(1)
