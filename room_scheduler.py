@@ -399,6 +399,9 @@ class Scheduler:
         started = self.start_exp(room_id, room_level)
         if started == "1":
             print("  [接管] 房间已开始, 进入翻期循环", flush=True)
+        elif "500" in str(started) or "error" in str(started).lower():
+            # 500错误 = 房间可能已经开始了(重复调用start会500)
+            print(f"  [接管] start返回服务器错误, 假设已开始, 直接进入翻期", flush=True)
         else:
             print(f"  [接管] 尝试开始返回{started}, 进入等待/强制开始流程", flush=True)
             ok = self.wait_and_start(room_id, room_level, n, created_at)
