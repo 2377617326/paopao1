@@ -386,15 +386,22 @@ class Scheduler:
                     break
             time.sleep(POLL_INTERVAL)
         print(f"  [强制] 到点未满{n}人, 强制开始", flush=True)
-        self.start_exp(room_id, room_level)
-        # 循环等待房间真正开始
-        for attempt in range(10):
+        while True:
+            if self._time_left() < 600:
+                print("  [结束] 接近job时限, 退出交给下个job", flush=True)
+                return False
+            self.start_exp(room_id, room_level)
             time.sleep(5)
             if self.is_room_started(room_id, room_level):
-                print(f"  [确认] 房间已开始 (强制, 第{attempt+1}次检查)", flush=True)
+                print("  [确认] 房间已开始!", flush=True)
                 return True
-            print(f"  [重试] 强制开始后第{attempt+1}次检查未开始, 继续等待...", flush=True)
-        return False
+            # 检查房间是否已被系统解散
+            players, maxp = self.room_status(room_id, room_level)
+            if players is None:
+                print("  [结束] 房间已解散", flush=True)
+                return False
+            print(f"  [重试] 未开始(人数{players}/{maxp}), 10s后重试...", flush=True)
+            time.sleep(10)
 
     def flip_loop(self, room_id, room_level, dc=None):
         """翻期循环: 每30s轮询 next_period(), 服务器返回"1"就翻期. 翻完检查结束"""
