@@ -421,6 +421,8 @@ class Scheduler:
             print(f"  [接管] 尝试开始返回{started}, 进入等待/强制开始流程", flush=True)
             ok = self.wait_and_start(room_id, room_level, n, self._now())
             if not ok:
+                print(f"  [失败] 房间开始失败, 清理并退出", flush=True)
+                self.room_clean(room_level)
                 return False
         self.flip_loop(room_id, room_level, dc=dc)
         return True
