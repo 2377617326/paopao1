@@ -269,7 +269,7 @@ class Scheduler:
         return False
 
     def is_room_started(self, room_id, room_level):
-        """判断房间是否已开始: '进行中'/'进入竞赛'=已开始, '继续等待'=未开始"""
+        """判断房间是否已开始: '进行中'/'进入'=已开始, '继续等待'=未开始, '已结束'=已结束"""
         try:
             html = self._get("/room/gotoAddRoom", userId=self.user_id, roomLevelId=room_level)
             for block in re.split(r'<div class="col-11 px-2 mb-3 room-list-item">', html):
@@ -278,7 +278,8 @@ class Scheduler:
                         return True
                     if "继续等待" in block:
                         return False
-                    if "进行中" in block or "进入竞赛" in block:
+                    # "进行中"和"进入"(进入竞赛)都表示已开始
+                    if "进行中" in block or "进入" in block:
                         return True
                     return False
         except Exception:
