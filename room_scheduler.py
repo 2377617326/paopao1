@@ -59,7 +59,7 @@ ROOM_PASSWORD = "123"
 FORCE_START_AFTER = 40    # 建房后40分钟强制开始
 START_LIMIT_HOUR = 22     # 22点后不再新建房间
 POLL_INTERVAL = 15        # 轮询秒数
-MAX_JOB_RUNTIME = 5.9 * 60 * 60  # GitHub Actions job 限6小时, 留余量
+MAX_JOB_RUNTIME = 1.9 * 60 * 60  # 每2小时cron, 留余量提前退出交给下个job
 FLIP_RETRY = 3            # 翻期失败重试次数
 
 # 9001 决策软件端口
