@@ -475,6 +475,7 @@ class Scheduler:
         else:
             # 其他返回=房间可能没开始, 无限重试start_exp直到开始或解散
             print(f"  [接管] 房间未开始, 循环尝试start_exp", flush=True)
+            started = False
             while True:
                 if self._time_left() < 600:
                     print("  [结束] 接近job时限, 退出交给下个job", flush=True)
@@ -483,6 +484,7 @@ class Scheduler:
                 time.sleep(5)
                 if self.is_room_started(room_id, room_level):
                     print("  [确认] 房间已开始!", flush=True)
+                    started = True
                     break
                 # 检查房间是否已解散
                 players2, _ = self.room_status(room_id, room_level)
@@ -491,6 +493,8 @@ class Scheduler:
                     return False
                 print(f"  [重试] 未开始(人数{players2}), 15s后重试...", flush=True)
                 time.sleep(10)
+            if not started:
+                return False
         self.flip_loop(room_id, room_level, dc=dc)
         return True
 
