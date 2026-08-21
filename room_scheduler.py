@@ -347,72 +347,65 @@ class Scheduler:
         print(f"  [开始] 返回码: {resp}", flush=True)
         return resp == "1"
 
-    def flip_loop(self, room_id, room_level, start_time=None, dc=None):
-        """翻期循环: 每PERIOD_LENGTH分钟翻一期, 直到总季度数. 若已结束则提前返回"""
+    def flip_loop(self, room_id, room_level, dc=None):
+        """翻期循环: 每30s轮询 next_period(), 服务器返回"1"就翻期. 翻完检查结束"""
         total_flips = TOTAL_PERIOD - 1
         for i in range(total_flips):
-            # 若房间已结束则停止
-            if self.is_room_finished(room_id, room_level):
-                print("  [翻期] 房间已结束, 停止翻期")
-                return True
-            print(f"  [翻期] 等待 {PERIOD_LENGTH} 分钟后翻第{i+2}期...")
-            time.sleep(PERIOD_LENGTH * 60)
-            # 翻期前先让所有账号提交全0决策
+            next_period_num = i + 2
+            # 翻期前提交全0决策
             if dc:
-                period_now = i + 2
-                print(f"  [决策] 翻第{period_now}期前提交全0决策...")
-                dc.submit_all(room_id, period_now)
-            resp = self.next_period(room_id, room_level)
-            print(f"  [翻期] 第{i+2}期 返回码: {resp}")
-            if resp != "1":
-                for attempt in range(FLIP_RETRY):
-                    print(f"    重试({attempt+1}/{FLIP_RETRY})...")
-                    time.sleep(30)
-                    resp = self.next_period(room_id, room_level)
-                    print(f"    返回码: {resp}")
-                    if resp == "1":
-                        break
+                print(f"  [决策] 翻第{next_period_num}期前提交全0决策...", flush=True)
+                dc.submit_all(room_id, next_period_num)
+            # 轮询等待服务器可以翻期
+            print(f"  [翻期] 轮询等待第{next_period_num}期...", flush=True)
+            while True:
+                resp = self.next_period(room_id, room_level)
+                if resp == "1":
+                    print(f"  [翻期] 第{next_period_num}期 翻期成功!", flush=True)
+                    break
+                # 返回0=还没到时间, 继续轮询
+                print(f"  [翻期] 第{next_period_num}期 返回{resp}, 30s后重试...", flush=True)
+                time.sleep(30)
+            # 翻期后立即检查是否已结束
+            if self.is_room_finished(room_id, room_level):
+                print("  [翻期] 翻期后检测到房间已结束, 停止", flush=True)
+                return True
         # 全部季度完成, 提交最后一期决策后结束
         if dc:
-            print("  [决策] 最后一期提交全0决策...")
+            print("  [决策] 最后一期提交全0决策...", flush=True)
             dc.submit_all(room_id, TOTAL_PERIOD)
-        print("  [结束] 全部季度完成, 结束实验")
-        resp = self.finish_exp(room_id, room_level)
-        print(f"  [结束] 返回码: {resp}")
-        if resp != "1":
-            for attempt in range(FLIP_RETRY):
-                print(f"    结束重试({attempt+1}/{FLIP_RETRY})...")
-                time.sleep(30)
-                resp = self.finish_exp(room_id, room_level)
-                print(f"    返回码: {resp}")
-                if resp == "1":
-                    break
+        print("  [结束] 全部季度完成, 轮询等待结束...", flush=True)
+        while True:
+            resp = self.finish_exp(room_id, room_level)
+            if resp == "1":
+                print("  [结束] 实验已结束!", flush=True)
+                break
+            print(f"  [结束] 返回{resp}, 30s后重试...", flush=True)
+            time.sleep(30)
         return True
 
-    def handle_room(self, room_id, room_level, created_at=None):
-        """处理一个房间的完整生命周期(等待开始->翻期->结束).
-        若已开始则直接进入翻期循环. 返回 True 表示处理完(结束/移交下一job)
+    def handle_room(self, room_id, room_level):
+        """处理一个房间的完整生命周期(开始->翻期->结束).
+        接管后直接轮询翻期, 不需要知道房间何时开始.
         """
         level = LEVELS[room_level]
         n = level["full_n"]
         dc = DecisionClient(self.timeout)
-        if created_at is None:
-            created_at = self._now() - dt.timedelta(minutes=FORCE_START_AFTER)
-        # 检查是否已开始 (若已过强制时间则直接翻期阶段)
         players, maxp = self.room_status(room_id, room_level)
         print(f"  [接管] 房号{room_id} 场次{room_level}({level['name']}) 当前 {players}/{maxp}", flush=True)
         if players is None:
             print("  [接管] 房间不存在或不可访问", flush=True)
             return True
+        # 尝试开始房间
         started = self.start_exp(room_id, room_level)
         if started == "1":
-            print("  [接管] 房间已开始, 进入翻期循环", flush=True)
+            print("  [接管] 房间已开始, 进入翻期轮询", flush=True)
         elif "500" in str(started) or "error" in str(started).lower():
-            # 500错误 = 房间可能已经开始了(重复调用start会500)
-            print(f"  [接管] start返回服务器错误, 假设已开始, 直接进入翻期", flush=True)
+            # 500 = 房间已经开始了(重复调用start会500)
+            print(f"  [接管] start返回服务器错误, 假设已开始, 直接进入翻期轮询", flush=True)
         else:
             print(f"  [接管] 尝试开始返回{started}, 进入等待/强制开始流程", flush=True)
-            ok = self.wait_and_start(room_id, room_level, n, created_at)
+            ok = self.wait_and_start(room_id, room_level, n, self._now())
             if not ok:
                 return False
         self.flip_loop(room_id, room_level, dc=dc)
@@ -489,7 +482,7 @@ class Scheduler:
                 time.sleep(120)
                 continue
             print(f"  [建房] 成功! 房号{room_id}", flush=True)
-            self.handle_room(room_id, room_level, created_at)
+            self.handle_room(room_id, room_level)
 
     def pick_level(self, primary, secondary):
         """主/次/默认选择场次. 主满->试次, 次满->默认牛刀小试"""
@@ -544,7 +537,7 @@ def main():
             created_at = sched._now()
             ok, room_id = sched.create_room(room_level, created_at, room_name=args.room_name)
             if ok:
-                sched.handle_room(room_id, room_level, created_at)
+                sched.handle_room(room_id, room_level)
     else:
         sched.run(dry_run=args.dry_run)
 
