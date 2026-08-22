@@ -52,7 +52,7 @@ LEVELS = {
 }
 
 ROOM_NAME_MARK = os.environ.get("ROOM_NAME_MARK", "尔尔定时比赛q群5342744003")
-ROOM_NAME_TPL = ROOM_NAME_MARK + " 不满{time}开"
+ROOM_NAME_TPL = ROOM_NAME_MARK + " 自动测试{time}开"
 TOTAL_PERIOD = 4          # 4季度
 PERIOD_LENGTH = 20        # 每周期20分钟 (翻期间隔)
 ROOM_PASSWORD = "123"
