@@ -14,6 +14,9 @@ concurrency:
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
     steps:
       - uses: actions/checkout@v4
 
@@ -30,3 +33,22 @@ jobs:
           BOT_PASS: ${{ secrets.BOT_PASS }}
         run: |
           python room_scheduler.py --login "$BOT_USER" "$BOT_PASS"
+
+      - name: 自动重启(工作时间内)
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          HOUR_BJ=$(( ($(date -u +%H) + 8) % 24 ))
+          if [ $HOUR_BJ -ge 8 ] && [ $HOUR_BJ -lt 22 ]; then
+            echo "北京时间 ${HOUR_BJ}:00, 仍在工作时间, 30秒后自动重启..."
+            sleep 30
+            curl -s -X POST \
+              -H "Authorization: token $GH_TOKEN" \
+              -H "Accept: application/vnd.github.v3+json" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/room_bot.yml/dispatches" \
+              -d '{"ref":"main"}'
+            echo "已触发新run"
+          else
+            echo "北京时间 ${HOUR_BJ}:00, 非工作时间, 不重启"
+          fi
