@@ -51,8 +51,8 @@ LEVELS = {
     6: {"name": "八仙过海", "full_n": 10, "min_players": 3},
 }
 
-ROOM_NAME_MARK = os.environ.get("ROOM_NAME_MARK", "测试")
-ROOM_NAME_TPL = ROOM_NAME_MARK + "（满{n}开）不满{time}开"
+ROOM_NAME_MARK = os.environ.get("ROOM_NAME_MARK", "尔尔定时比赛q群5342744003")
+ROOM_NAME_TPL = ROOM_NAME_MARK + " 不满{time}开"
 TOTAL_PERIOD = 4          # 4季度
 PERIOD_LENGTH = 20        # 每周期20分钟 (翻期间隔)
 ROOM_PASSWORD = "123"
@@ -437,32 +437,17 @@ class Scheduler:
         return True, room_id
 
     def wait_and_start(self, room_id, room_level, n, created_at):
-        """等满n人 或 到40min强制开. 用页面状态文字判断是否成功开始. 不检查时限,必须等到开始或解散"""
+        """等40分钟后强制开始"""
         force_time = created_at + dt.timedelta(minutes=FORCE_START_AFTER)
-        print(f"  [等待] 房号{room_id} 满{n}人开, 未满则 {force_time.strftime('%H:%M')} 强制开", flush=True)
+        print(f"  [等待] 房号{room_id} 等到 {force_time.strftime('%H:%M')} 开始", flush=True)
         while self._now() < force_time:
             players, maxp = self.room_status(room_id, room_level)
             if players is None:
                 print(f"  [检测] 获取人数失败, {POLL_INTERVAL}s后重试", flush=True)
-                time.sleep(POLL_INTERVAL)
-                continue
-            print(f"  [检测] {self._now().strftime('%H:%M:%S')} 人数 {players}/{maxp} (目标{n})", flush=True)
-            if players >= n:
-                print(f"  [触发] 已满{n}人, 立即开始!", flush=True)
-                while True:
-                    self.start_exp(room_id, room_level)
-                    time.sleep(5)
-                    if self.is_room_started(room_id, room_level):
-                        print("  [确认] 房间已开始!", flush=True)
-                        return True
-                    players2, _ = self.room_status(room_id, room_level)
-                    if players2 is None:
-                        print("  [结束] 房间已解散", flush=True)
-                        return False
-                    print(f"  [重试] 未开始, 10s后重试...", flush=True)
-                    time.sleep(10)
+            else:
+                print(f"  [检测] {self._now().strftime('%H:%M:%S')} 人数 {players}/{maxp}", flush=True)
             time.sleep(POLL_INTERVAL)
-        print(f"  [强制] 到点未满{n}人, 强制开始", flush=True)
+        print(f"  [强制] 到点, 强制开始", flush=True)
         while True:
             self.start_exp(room_id, room_level)
             time.sleep(5)
