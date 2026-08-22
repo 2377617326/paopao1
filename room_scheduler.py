@@ -81,6 +81,11 @@ class DecisionClient:
     def _login(self, uid, room_id):
         s = requests.Session()
         s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+        # 先访问页面获取CSRF token
+        s.get(f"{BASE_9001}/", timeout=self.timeout)
+        xsrf = s.cookies.get("XSRF-TOKEN")
+        if xsrf:
+            s.headers["X-XSRF-TOKEN"] = xsrf
         r = s.post(f"{BASE_9001}/room/gotoMatch",
                    data={"str": f"login?userId={uid}*roomId={room_id}"}, timeout=self.timeout)
         try:
@@ -88,6 +93,10 @@ class DecisionClient:
         except (KeyError, ValueError):
             print(f"    [决策] gotoMatch响应异常: {r.text[:200]}")
             return None, None, None
+        # 刷新CSRF token
+        xsrf = s.cookies.get("XSRF-TOKEN")
+        if xsrf:
+            s.headers["X-XSRF-TOKEN"] = xsrf
         r2 = s.post(f"{BASE_9001}/login/login", data={
             "loginName": d["loginName"], "loginPass": d["loginPass"],
             "loginType": d["loginType"], "expId": d["expId"], "lagOrVersionId": "102",
@@ -105,12 +114,14 @@ class DecisionClient:
             "uid": str(user.get("userId")), "token": str(user.get("token") or user.get("userId")),
             "periodNum": str(user.get("periodNum", 1)),
             "totalPeriod": str(user.get("exp", {}).get("totalPeriod", 4)) if isinstance(user.get("exp"), dict) else "4",
-            "userName": urllib.parse.quote(str(user.get("userName"))),
-            "className": urllib.parse.quote(str(user.get("className"))),
+            "userName": urllib.parse.quote(str(user.get("userName")), safe=''),
+            "className": urllib.parse.quote(str(user.get("className")), safe=''),
             "roleTypeId": "1",
         }
         for k, v in ck.items():
-            s.cookies.set(k, v, domain="121.42.10.114", path="/")
+            # 确保cookie值是ASCII安全的
+            safe_v = urllib.parse.quote(str(v), safe='')
+            s.cookies.set(k, safe_v, domain="121.42.10.114", path="/")
         return s, user, ck
 
     def get_uid(self, username):
