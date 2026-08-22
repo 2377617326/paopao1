@@ -238,18 +238,26 @@ class Scheduler:
             r.encoding = "utf-8"
         return r.text
 
-    def login(self):
-        r = self.session.post(f"{BASE}/roomLogin/login",
-                              data={"loginName": self.username, "loginPass": self.password},
-                              timeout=self.timeout)
-        resp = r.text.strip()
-        if resp == "1":
-            idx = self._get("/room/roomIndex")
-            m = re.search(r"userId\s*=\s*['\"](\d+)['\"]", idx)
-            self.user_id = m.group(1) if m else None
-            print(f"[OK] 登录成功: {self.username} (userId={self.user_id})")
-            return True
-        print(f"[FAIL] 登录失败: {resp}")
+    def login(self, max_retries=10):
+        for attempt in range(max_retries):
+            # 每次重试用新session, 避免旧session干扰
+            if attempt > 0:
+                self.session = requests.Session()
+                self.session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
+                print(f"  [登录] 第{attempt+1}次重试...", flush=True)
+                time.sleep(30)
+            r = self.session.post(f"{BASE}/roomLogin/login",
+                                  data={"loginName": self.username, "loginPass": self.password},
+                                  timeout=self.timeout)
+            resp = r.text.strip()
+            if resp == "1":
+                idx = self._get("/room/roomIndex")
+                m = re.search(r"userId\s*=\s*['\"](\d+)['\"]", idx)
+                self.user_id = m.group(1) if m else None
+                print(f"[OK] 登录成功: {self.username} (userId={self.user_id})")
+                return True
+            print(f"[FAIL] 登录失败: {resp} (返回码2=账号被占用, 等待session释放)", flush=True)
+        print(f"[FAIL] 登录重试{max_retries}次仍失败", flush=True)
         return False
 
     def room_clean(self, room_level):
