@@ -51,7 +51,7 @@ LEVELS = {
     6: {"name": "八仙过海", "full_n": 10, "min_players": 3},
 }
 
-ROOM_NAME_MARK = os.environ.get("ROOM_NAME_MARK", "尔尔定时比赛q群5342744003")
+ROOM_NAME_MARK = os.environ.get("ROOM_NAME_MARK", "测试")
 ROOM_NAME_TPL = ROOM_NAME_MARK + "（满{n}开）不满{time}开"
 TOTAL_PERIOD = 4          # 4季度
 PERIOD_LENGTH = 20        # 每周期20分钟 (翻期间隔)
@@ -141,8 +141,19 @@ class DecisionClient:
                 return p
         return None
 
+    DECISION_TYPES = [
+        (1, "0,0,0,"),
+        (2, "0,0,0,0,0,0,"),
+        (3, "0,0,0,0,0,0,0,0,0,"),
+        (4, "0,0,0,0,0,0,0,0,0,0,0,0,"),
+        (5, "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"),
+        (6, "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,"),
+        (7, "0,0,0,0,0,0,0,0,0,"),
+        (8, "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,"),
+    ]
+
     def submit_decision(self, username, room_id, period_num):
-        """提交全0决策 (type=1销售预测/2研发投入/3生产量). 返回是否全部成功"""
+        """提交8种决策(type1-8), type8带state=2为最终提交. 返回是否全部成功"""
         uid = self.get_uid(username)
         if not uid:
             print(f"    [决策] {username} 无法获取uid")
@@ -155,19 +166,23 @@ class DecisionClient:
             print(f"    [决策] {username} 登录9001失败: {e}")
             return False
         ok = True
-        for typ, sval in [(1, "0,0,0,0,0,0,0,0,0,"), (2, "0,0,0,0,0,0,"), (3, "0,0,0,0,0,0,0,0,0,")]:
+        for typ, sval in self.DECISION_TYPES:
             p = {
-                "type": str(typ), "periodNum": str(period_num), "num": "1",
+                "type": str(typ), "periodNum": str(period_num), "num": str(period_num),
                 "companyId": str(user.get("companyId")), "expId": str(user.get("expId")),
                 "userId": str(user.get("userId")), "userName": ck["userName"],
                 "className": ck["className"], "lagOrVersionId": "102", "str": sval,
             }
+            if typ == 8:
+                p["state"] = "2"
             try:
                 rr = s.post(f"{BASE_9001}/student/decisionInfo/saveDecisionInfo?"
                             + urllib.parse.urlencode(p), timeout=self.timeout)
                 if "2000" not in rr.text:
+                    print(f"    [决策] type{typ} 失败: {rr.text[:100]}")
                     ok = False
-            except Exception:
+            except Exception as e:
+                print(f"    [决策] type{typ} 异常: {e}")
                 ok = False
         return ok
 
