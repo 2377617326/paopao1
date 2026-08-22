@@ -436,6 +436,7 @@ class Scheduler:
                 print(f"  [决策] 第{p}期提交全0决策...", flush=True)
                 dc.submit_all(room_id, p)
         flip_count = 0
+        no_flip_count = 0
         while True:
             if self._time_left() < 600:
                 print("  [翻期] 接近job时限, 退出交给下个job", flush=True)
@@ -447,6 +448,7 @@ class Scheduler:
             resp = self.next_period(room_id, room_level)
             if resp == "1":
                 flip_count += 1
+                no_flip_count = 0
                 print(f"  [翻期] 翻期成功! (累计{flip_count}次)", flush=True)
                 # 翻期后提交决策
                 if dc:
@@ -456,8 +458,17 @@ class Scheduler:
                     print("  [翻期] 翻期后房间已结束, 停止", flush=True)
                     return True
             else:
+                no_flip_count += 1
                 print(f"  [翻期] 返回{resp}, 30s后重试...", flush=True)
                 time.sleep(30)
+                # 连续20次(10分钟)无法翻期, 可能已在最后一期, 尝试结束
+                if no_flip_count >= 20:
+                    print("  [结束] 长时间无法翻期, 尝试结束房间...", flush=True)
+                    resp2 = self.finish_exp(room_id, room_level)
+                    if resp2 == "1" or self.is_room_finished(room_id, room_level):
+                        print("  [结束] 房间已结束!", flush=True)
+                        return True
+                    no_flip_count = 0
             # 如果翻期次数已达上限, 尝试结束
             if flip_count >= TOTAL_PERIOD - 1:
                 print("  [结束] 翻期次数已达上限, 尝试结束房间...", flush=True)
