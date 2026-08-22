@@ -148,7 +148,7 @@ class DecisionClient:
         (4, "0,0,0,0,0,0,0,0,0,0,0,0,"),
         (5, "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0"),
         (6, "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,"),
-        (7, "0,0,0,0,0,0,0,0,0,"),
+        (7, "9999,9999,9999,9999,9999,9999,9999,9999,9999,"),
         (8, "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,"),
     ]
 
@@ -227,7 +227,11 @@ class Scheduler:
         xsrf = self.session.cookies.get("XSRF-TOKEN")
         if xsrf:
             self.session.headers["X-XSRF-TOKEN"] = xsrf
-        r = self.session.post(url, timeout=self.timeout)
+        try:
+            r = self.session.post(url, timeout=self.timeout)
+        except Exception as e:
+            print(f"  [网络] POST {path} 超时/异常: {e}", flush=True)
+            return "-1"
         text = r.text.strip()
         # CSRF失效时重新登录再试一次
         if "CSRF" in text or "1004" in text:
@@ -236,7 +240,11 @@ class Scheduler:
             xsrf = self.session.cookies.get("XSRF-TOKEN")
             if xsrf:
                 self.session.headers["X-XSRF-TOKEN"] = xsrf
-            r = self.session.post(url, timeout=self.timeout)
+            try:
+                r = self.session.post(url, timeout=self.timeout)
+            except Exception as e:
+                print(f"  [网络] POST {path} 重试超时: {e}", flush=True)
+                return "-1"
             text = r.text.strip()
         return text
 
@@ -245,12 +253,20 @@ class Scheduler:
         if params:
             enc = "&".join(f"{k}={urllib.parse.quote(str(v), safe='')}" for k, v in params.items())
             url += "?" + enc
-        r = self.session.get(url, timeout=self.timeout)
+        try:
+            r = self.session.get(url, timeout=self.timeout)
+        except Exception as e:
+            print(f"  [网络] GET {path} 超时/异常: {e}", flush=True)
+            return ""
         r.encoding = "utf-8"
         # session过期时重新登录再试
         if "login" in r.url.lower() or r.text.strip() == "":
             self.login()
-            r = self.session.get(url, timeout=self.timeout)
+            try:
+                r = self.session.get(url, timeout=self.timeout)
+            except Exception as e:
+                print(f"  [网络] GET {path} 重试超时: {e}", flush=True)
+                return ""
             r.encoding = "utf-8"
         return r.text
 
