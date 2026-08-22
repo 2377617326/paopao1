@@ -83,12 +83,20 @@ class DecisionClient:
         s.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
         r = s.post(f"{BASE_9001}/room/gotoMatch",
                    data={"str": f"login?userId={uid}*roomId={room_id}"}, timeout=self.timeout)
-        d = r.json()["Data"]
+        try:
+            d = r.json()["Data"]
+        except (KeyError, ValueError):
+            print(f"    [决策] gotoMatch响应异常: {r.text[:200]}")
+            return None, None, None
         r2 = s.post(f"{BASE_9001}/login/login", data={
             "loginName": d["loginName"], "loginPass": d["loginPass"],
             "loginType": d["loginType"], "expId": d["expId"], "lagOrVersionId": "102",
         }, timeout=self.timeout)
-        user = r2.json()["Data"]
+        try:
+            user = r2.json()["Data"]
+        except (KeyError, ValueError):
+            print(f"    [决策] login响应异常: {r2.text[:200]}")
+            return None, None, None
         ck = {
             "role": str(d["loginType"]), "lagOrVersionId": "102", "loginName": d["loginName"],
             "compId": str(user.get("companyId")), "companyCode": str(user.get("companyCode")),
@@ -130,6 +138,8 @@ class DecisionClient:
             return False
         try:
             s, user, ck = self._login(uid, room_id)
+            if s is None:
+                return False
         except Exception as e:
             print(f"    [决策] {username} 登录9001失败: {e}")
             return False
@@ -186,8 +196,22 @@ class Scheduler:
         if params:
             enc = "&".join(f"{k}={urllib.parse.quote(str(v), safe='')}" for k, v in params.items())
             url += "?" + enc
+        # 带CSRF token
+        xsrf = self.session.cookies.get("XSRF-TOKEN")
+        if xsrf:
+            self.session.headers["X-XSRF-TOKEN"] = xsrf
         r = self.session.post(url, timeout=self.timeout)
-        return r.text.strip()
+        text = r.text.strip()
+        # CSRF失效时重新登录再试一次
+        if "CSRF" in text or "1004" in text:
+            print("  [CSRF] token失效, 重新登录...", flush=True)
+            self.login()
+            xsrf = self.session.cookies.get("XSRF-TOKEN")
+            if xsrf:
+                self.session.headers["X-XSRF-TOKEN"] = xsrf
+            r = self.session.post(url, timeout=self.timeout)
+            text = r.text.strip()
+        return text
 
     def _get(self, path, **params):
         url = f"{BASE}{path}"
@@ -196,6 +220,11 @@ class Scheduler:
             url += "?" + enc
         r = self.session.get(url, timeout=self.timeout)
         r.encoding = "utf-8"
+        # session过期时重新登录再试
+        if "login" in r.url.lower() or r.text.strip() == "":
+            self.login()
+            r = self.session.get(url, timeout=self.timeout)
+            r.encoding = "utf-8"
         return r.text
 
     def login(self):
