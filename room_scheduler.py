@@ -462,32 +462,54 @@ class Scheduler:
             print(f"  [重试] 未开始(人数{players}/{maxp}), 10s后重试...", flush=True)
             time.sleep(10)
 
+    def _get_current_period(self, room_id, dc):
+        """从9001登录获取当前期数, 用于重启后恢复"""
+        try:
+            uid = dc.get_uid(self.username)
+            if not uid:
+                return 1
+            s, user, ck = dc._login(uid, room_id)
+            if s is None:
+                return 1
+            p = int(user.get("periodNum", 1))
+            print(f"  [决策] 当前期数: {p}", flush=True)
+            return max(1, min(p, TOTAL_PERIOD))
+        except Exception:
+            return 1
+
     def flip_loop(self, room_id, room_level, dc=None):
-        """翻期循环: 持续轮询 next_period() 直到房间结束. 不依赖固定次数, 接管任何阶段都能继续"""
-        # 先提交所有期的决策(必须完成四季度决策, 否则账号被封)
+        """翻期循环: 决策(当期)→翻期→决策(下期)→...→第4期决策→结束.
+        重启后从9001获取当前期数, 确保每期都提交决策(不决策会封号)"""
+        if self.is_room_finished(room_id, room_level):
+            print("  [翻期] 房间已结束, 停止", flush=True)
+            return True
+
+        # 获取当前期数(重启恢复)
+        current_period = 1
         if dc:
-            for p in range(1, TOTAL_PERIOD + 1):
-                print(f"  [决策] 第{p}期提交全0决策...", flush=True)
-                dc.submit_all(room_id, p)
-        flip_count = 0
+            current_period = self._get_current_period(room_id, dc)
+
+        # 提交当前期决策
+        if dc:
+            print(f"  [决策] 提交第{current_period}期决策...", flush=True)
+            dc.submit_all(room_id, current_period)
+
         no_flip_count = 0
-        while True:
+        while current_period < TOTAL_PERIOD:
             if self._time_left() < 600:
                 print("  [翻期] 接近job时限, 退出交给下个job", flush=True)
                 return False
-            # 先检查房间是否已结束
             if self.is_room_finished(room_id, room_level):
                 print("  [翻期] 房间已结束, 停止", flush=True)
                 return True
             resp = self.next_period(room_id, room_level)
             if resp == "1":
-                flip_count += 1
+                current_period += 1
                 no_flip_count = 0
-                print(f"  [翻期] 翻期成功! (累计{flip_count}次)", flush=True)
-                # 翻期后提交决策
+                print(f"  [翻期] 翻期成功! 进入第{current_period}期", flush=True)
                 if dc:
-                    dc.submit_all(room_id, min(flip_count + 1, TOTAL_PERIOD))
-                # 检查是否已结束
+                    print(f"  [决策] 提交第{current_period}期决策...", flush=True)
+                    dc.submit_all(room_id, current_period)
                 if self.is_room_finished(room_id, room_level):
                     print("  [翻期] 翻期后房间已结束, 停止", flush=True)
                     return True
@@ -495,7 +517,6 @@ class Scheduler:
                 no_flip_count += 1
                 print(f"  [翻期] 返回{resp}, 30s后重试...", flush=True)
                 time.sleep(30)
-                # 连续20次(10分钟)无法翻期, 可能已在最后一期, 尝试结束
                 if no_flip_count >= 20:
                     print("  [结束] 长时间无法翻期, 尝试结束房间...", flush=True)
                     resp2 = self.finish_exp(room_id, room_level)
@@ -503,22 +524,22 @@ class Scheduler:
                         print("  [结束] 房间已结束!", flush=True)
                         return True
                     no_flip_count = 0
-            # 如果翻期次数已达上限, 尝试结束
-            if flip_count >= TOTAL_PERIOD - 1:
-                print("  [结束] 翻期次数已达上限, 尝试结束房间...", flush=True)
-                while True:
-                    if self._time_left() < 600:
-                        print("  [结束] 接近job时限, 退出交给下个job", flush=True)
-                        return False
-                    resp = self.finish_exp(room_id, room_level)
-                    if resp == "1":
-                        print("  [结束] 实验已结束!", flush=True)
-                        return True
-                    if self.is_room_finished(room_id, room_level):
-                        print("  [结束] 房间已结束!", flush=True)
-                        return True
-                    print(f"  [结束] 返回{resp}, 30s后重试...", flush=True)
-                    time.sleep(30)
+
+        # 第4期决策已提交, 结束房间
+        print("  [结束] 4期决策已全部提交, 结束房间...", flush=True)
+        while True:
+            if self._time_left() < 600:
+                print("  [结束] 接近job时限, 退出交给下个job", flush=True)
+                return False
+            resp = self.finish_exp(room_id, room_level)
+            if resp == "1":
+                print("  [结束] 实验已结束!", flush=True)
+                return True
+            if self.is_room_finished(room_id, room_level):
+                print("  [结束] 房间已结束!", flush=True)
+                return True
+            print(f"  [结束] 返回{resp}, 30s后重试...", flush=True)
+            time.sleep(30)
 
     def handle_room(self, room_id, room_level):
         """处理一个房间的完整生命周期(开始->翻期->结束).
