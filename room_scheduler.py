@@ -66,9 +66,9 @@ FLIP_RETRY = 3            # 翻期失败重试次数
 BASE_9001 = os.environ.get("BASE_9001", "http://121.42.10.114:9001")
 
 # 参赛账号: (用户名, 密码)
-# 唯一账号: 自动房间-1
+# 唯一账号: 自动-1
 ALL_ACCOUNTS = [
-    ("自动房间-1", "321"),
+    ("自动-1", "321"),
 ]
 
 
@@ -449,6 +449,11 @@ class Scheduler:
 
     def flip_loop(self, room_id, room_level, dc=None):
         """翻期循环: 持续轮询 next_period() 直到房间结束. 不依赖固定次数, 接管任何阶段都能继续"""
+        # 先提交所有期的决策(必须完成四季度决策, 否则账号被封)
+        if dc:
+            for p in range(1, TOTAL_PERIOD + 1):
+                print(f"  [决策] 第{p}期提交全0决策...", flush=True)
+                dc.submit_all(room_id, p)
         flip_count = 0
         no_flip_count = 0
         while True:
@@ -464,6 +469,9 @@ class Scheduler:
                 flip_count += 1
                 no_flip_count = 0
                 print(f"  [翻期] 翻期成功! (累计{flip_count}次)", flush=True)
+                # 翻期后提交决策
+                if dc:
+                    dc.submit_all(room_id, min(flip_count + 1, TOTAL_PERIOD))
                 # 检查是否已结束
                 if self.is_room_finished(room_id, room_level):
                     print("  [翻期] 翻期后房间已结束, 停止", flush=True)
@@ -526,7 +534,8 @@ class Scheduler:
                     return False
                 print(f"  [重试] 未开始(人数{players2}), 15s后重试...", flush=True)
                 time.sleep(10)
-        self.flip_loop(room_id, room_level)
+        dc = DecisionClient(self.timeout)
+        self.flip_loop(room_id, room_level, dc=dc)
         return True
 
     def run(self, dry_run=False):
@@ -615,7 +624,8 @@ class Scheduler:
             n = LEVELS[room_level]["full_n"]
             started = self.wait_and_start(room_id, room_level, n, created_at)
             if started:
-                self.flip_loop(room_id, room_level)
+                dc = DecisionClient(self.timeout)
+                self.flip_loop(room_id, room_level, dc=dc)
 
     def pick_level(self, primary, secondary):
         """主/次/默认选择场次. 主满->试次, 次满->默认牛刀小试"""
