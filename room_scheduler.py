@@ -152,9 +152,10 @@ class DecisionClient:
         (8, "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,"),
     ]
 
-    def submit_decision(self, username, room_id, period_num):
+    def submit_decision(self, username, room_id, period_num, uid=None):
         """提交8种决策(type1-8), type8带state=2为最终提交. 返回是否全部成功"""
-        uid = self.get_uid(username)
+        if not uid:
+            uid = self.get_uid(username)
         if not uid:
             print(f"    [决策] {username} 无法获取uid")
             return False
@@ -186,17 +187,17 @@ class DecisionClient:
                 ok = False
         return ok
 
-    def submit_all(self, room_id, period_num):
+    def submit_all(self, room_id, period_num, uid=None):
         """所有账号提交全0决策, 返回成功数"""
         ok_count = 0
         for username, pwd in ALL_ACCOUNTS:
             try:
-                if self.submit_decision(username, room_id, period_num):
+                if self.submit_decision(username, room_id, period_num, uid=uid):
                     ok_count += 1
                     print(f"    [决策] {username} 提交成功 ({ok_count})")
             except Exception as e:
                 print(f"    [决策] {username} 异常: {e}")
-        print(f"  [决策] 本轮 {ok_count}/{len(ALL_ACCOUNTS)} 个账号提交全0决策")
+        print(f"  [决策] 本轮 {ok_count}/{len(ALL_ACCOUNTS)} 个账号提交决策")
         return ok_count
 
 
@@ -282,15 +283,12 @@ class Scheduler:
             print(f"  [清理] 异常: {e}")
 
     def find_own_rooms(self, mark=None):
-        """扫描所有场次, 返回 {room_level: room_id} 自己的房间(名字含标记 且 房主是自己). 优先返回未结束的房间"""
-        mark = mark or ROOM_NAME_MARK
+        """扫描所有场次, 返回 {room_level: room_id} 自己是房主的房间. 优先返回未结束的房间"""
         found = {}
         for lv in LEVELS:
             try:
                 html = self._get("/room/gotoAddRoom", userId=self.user_id, roomLevelId=lv)
                 for block in re.split(r'<div class="col-11 px-2 mb-3 room-list-item">', html):
-                    if mark not in block:
-                        continue
                     owner_match = re.search(r'房主名字[：:]\s*([^<\s]+)', block)
                     if not owner_match:
                         continue
@@ -324,7 +322,7 @@ class Scheduler:
         try:
             html = self._get("/room/gotoAddRoom", userId=self.user_id, roomLevelId=room_level)
             for block in re.split(r'<div class="col-11 px-2 mb-3 room-list-item">', html):
-                if f"'{room_id}'" in block and ROOM_NAME_MARK in block:
+                if f"'{room_id}'" in block:
                     return "已结束" in block
         except Exception:
             pass
@@ -335,7 +333,7 @@ class Scheduler:
         try:
             html = self._get("/room/gotoAddRoom", userId=self.user_id, roomLevelId=room_level)
             for block in re.split(r'<div class="col-11 px-2 mb-3 room-list-item">', html):
-                if f"'{room_id}'" in block and ROOM_NAME_MARK in block:
+                if f"'{room_id}'" in block:
                     if "已结束" in block:
                         return True
                     if "继续等待" in block:
@@ -465,7 +463,7 @@ class Scheduler:
     def _get_current_period(self, room_id, dc):
         """从9001登录获取当前期数, 用于重启后恢复"""
         try:
-            uid = dc.get_uid(self.username)
+            uid = self.user_id
             if not uid:
                 return 1
             s, user, ck = dc._login(uid, room_id)
@@ -489,10 +487,14 @@ class Scheduler:
         if dc:
             current_period = self._get_current_period(room_id, dc)
 
-        # 提交当前期决策
+        # 提交当前期决策(失败重试3次)
         if dc:
             print(f"  [决策] 提交第{current_period}期决策...", flush=True)
-            dc.submit_all(room_id, current_period)
+            for attempt in range(3):
+                if dc.submit_all(room_id, current_period) > 0:
+                    break
+                print(f"  [决策] 第{current_period}期提交失败, 30s后重试({attempt+1}/3)", flush=True)
+                time.sleep(30)
 
         no_flip_count = 0
         while current_period < TOTAL_PERIOD:
@@ -509,7 +511,11 @@ class Scheduler:
                 print(f"  [翻期] 翻期成功! 进入第{current_period}期", flush=True)
                 if dc:
                     print(f"  [决策] 提交第{current_period}期决策...", flush=True)
-                    dc.submit_all(room_id, current_period)
+                    for attempt in range(3):
+                        if dc.submit_all(room_id, current_period) > 0:
+                            break
+                        print(f"  [决策] 第{current_period}期提交失败, 30s后重试({attempt+1}/3)", flush=True)
+                        time.sleep(30)
                 if self.is_room_finished(room_id, room_level):
                     print("  [翻期] 翻期后房间已结束, 停止", flush=True)
                     return True
@@ -584,7 +590,7 @@ class Scheduler:
             # 检查是否接近job时限, 提前退出交给下个job
             elapsed_min = (time.time() - self.start_ts) / 60
             if self._time_left() < 600:
-                print("=== 接近job时限(6h), 退出, 下个job将接管 ===", flush=True)
+                print("=== 接近job时限, 退出, 下个job将接管 ===", flush=True)
                 return True
 
             now = self._now()
