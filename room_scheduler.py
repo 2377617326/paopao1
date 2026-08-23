@@ -520,8 +520,23 @@ class Scheduler:
         print(f"  [建房] 成功! 场次{room_level}({level['name']}) 房号{room_id} 名[{name}]", flush=True)
         return True, room_id
 
+    def _try_start(self, room_id, room_level, reason):
+        """尝试开赛并确认是否成功. 返回 True=已开始, False=已解散/收回, None=未开始待重试"""
+        resp = self.start_exp(room_id, room_level)
+        time.sleep(5)
+        if self.is_room_started(room_id, room_level):
+            print(f"  [确认] 房间已开始! (触发: {reason}, start返回[{resp}])", flush=True)
+            return True
+        players, maxp = self.room_status(room_id, room_level)
+        if players is None:
+            print(f"  [结束] 房间已解散/收回 (触发: {reason})", flush=True)
+            return False
+        print(f"  [未开] {reason} 后仍未开始(人数{players}/{maxp}, start返回[{resp}]), 稍后重试", flush=True)
+        return None
+
     def wait_and_start(self, room_id, room_level, n, created_at):
-        """从房间名解析开赛时间, 等到时间再开始"""
+        """从房间名解析开赛时间, 等到时间再开始. 等待期间人数达最低门槛则提前开赛."""
+        min_players = LEVELS[room_level]["min_players"]
         room_name = self._get_room_name(room_id, room_level)
         target_time = self._parse_start_time_from_name(room_name)
         if not target_time:
@@ -529,8 +544,17 @@ class Scheduler:
             target_time = created_at + dt.timedelta(minutes=FORCE_START_AFTER)
         wait_sec = (target_time - self._now()).total_seconds()
         if wait_sec > 0:
-            print(f"  [等待] 房号{room_id} [{room_name}] 开赛{target_time.strftime('%H:%M')}, 等{wait_sec/60:.0f}分钟", flush=True)
+            print(f"  [等待] 房号{room_id} [{room_name}] 开赛{target_time.strftime('%H:%M')}, 等{wait_sec/60:.0f}分钟(人数达{min_players}则提前开)", flush=True)
             while self._now() < target_time:
+                # 等待期间检查人数, 满足最少人数门槛则提前开赛
+                players, maxp = self.room_status(room_id, room_level)
+                if players is not None and players >= min_players:
+                    print(f"  [提前开] 房号{room_id} 人数已满门槛{players}/{min_players}, 提前开赛!", flush=True)
+                    res = self._try_start(room_id, room_level, "人数达标提前开")
+                    if res is True:
+                        return True
+                    if res is False:
+                        return False
                 time.sleep(min(30, max(1, wait_sec)))
                 wait_sec = (target_time - self._now()).total_seconds()
         print(f"  [强制] 到点, 强制开始", flush=True)
@@ -629,6 +653,7 @@ class Scheduler:
         """
         level = LEVELS[room_level]
         n = level["full_n"]
+        min_players = level["min_players"]
         players, maxp = self.room_status(room_id, room_level)
         print(f"  [接管] 房号{room_id} 场次{room_level}({level['name']}) 当前 {players}/{maxp}", flush=True)
         if players is None:
@@ -648,12 +673,34 @@ class Scheduler:
                 print(f"  [接管] 第{attempt+1}次获取房间名失败[{room_name}], 10s后重试", flush=True)
                 time.sleep(10)
             if not target_time:
+                # 房间名解析失败: 只要人数已达标也能直接开, 否则拒绝并等下个job
+                players_now, _ = self.room_status(room_id, room_level)
+                if players_now is not None and players_now >= min_players:
+                    print(f"  [接管] 房间名解析失败但人数已达标{players_now}/{min_players}, 直接开赛", flush=True)
+                    res = self._try_start(room_id, room_level, "接管人数达标")
+                    if res is True:
+                        dc = DecisionClient(self.timeout)
+                        self.flip_loop(room_id, room_level, dc=dc)
+                        return True
+                    if res is False:
+                        return False
                 print("  [接管] 无法获取房间名, 拒绝开赛, 等待下次接管", flush=True)
                 return False
             wait_sec = (target_time - self._now()).total_seconds()
             if wait_sec > 0:
-                print(f"  [接管] 房间名[{room_name}] 开赛时间{target_time.strftime('%H:%M')}, 等待{wait_sec/60:.0f}分钟", flush=True)
+                print(f"  [接管] 房间名[{room_name}] 开赛时间{target_time.strftime('%H:%M')}, 等待{wait_sec/60:.0f}分钟(人数达{min_players}则提前开)", flush=True)
                 while self._now() < target_time:
+                    # 等待期间检查人数, 满足最少人数门槛则提前开赛
+                    players_w, _ = self.room_status(room_id, room_level)
+                    if players_w is not None and players_w >= min_players:
+                        print(f"  [提前开] 房号{room_id} 人数已满门槛{players_w}/{min_players}, 提前开赛!", flush=True)
+                        res = self._try_start(room_id, room_level, "人数达标提前开")
+                        if res is True:
+                            dc = DecisionClient(self.timeout)
+                            self.flip_loop(room_id, room_level, dc=dc)
+                            return True
+                        if res is False:
+                            return False
                     time.sleep(min(30, max(1, wait_sec)))
                     wait_sec = (target_time - self._now()).total_seconds()
             # 等待结束, 开始循环start_exp
