@@ -608,7 +608,7 @@ class Scheduler:
                 if wait_sec > 0:
                     print(f"  [接管] 房间名[{room_name}] 开赛时间{target_time.strftime('%H:%M')}, 等待{wait_sec/60:.0f}分钟", flush=True)
                     while self._now() < target_time:
-                        time.sleep(min(30, wait_sec))
+                        time.sleep(min(30, max(1, wait_sec)))
                         wait_sec = (target_time - self._now()).total_seconds()
             # 等待结束, 开始循环start_exp
             print(f"  [接管] 到点, 循环尝试start_exp", flush=True)
@@ -710,7 +710,7 @@ class Scheduler:
                 time.sleep(120)
                 continue
             print(f"  [建房] 成功! 房号{room_id}", flush=True)
-            # 新房: 等人满或40分钟强制开, 然后翻期结束
+            # 新房: 按房间名时间开赛, 然后翻期结束
             n = LEVELS[room_level]["full_n"]
             started = self.wait_and_start(room_id, room_level, n, created_at)
             if started:
