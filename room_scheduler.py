@@ -463,7 +463,7 @@ class Scheduler:
         if room_id is None:
             print(f"  [建房] 建房成功但找不到房号!", flush=True)
             return False, None
-        print(f"  [建房] 成功! 场次{room_level}({level['name']}) 满{n}开 房号{room_id} 名[{name}]", flush=True)
+        print(f"  [建房] 成功! 场次{room_level}({level['name']}) 房号{room_id} 名[{name}]", flush=True)
         return True, room_id
 
     def wait_and_start(self, room_id, room_level, n, created_at):
