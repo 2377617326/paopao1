@@ -552,9 +552,9 @@ class Scheduler:
                     print(f"  [提前开] 房号{room_id} 人数已满门槛{players}/{min_players}, 提前开赛!", flush=True)
                     res = self._try_start(room_id, room_level, "人数达标提前开")
                     if res is True:
-                        return True
+                        return "started"
                     if res is False:
-                        return False
+                        return "reclaimed"
                 time.sleep(min(30, max(1, wait_sec)))
                 wait_sec = (target_time - self._now()).total_seconds()
         print(f"  [强制] 到点, 强制开始", flush=True)
@@ -676,14 +676,13 @@ class Scheduler:
                 # 房间名解析失败: 只要人数已达标也能直接开, 否则拒绝并等下个job
                 players_now, _ = self.room_status(room_id, room_level)
                 if players_now is not None and players_now >= min_players:
-                    print(f"  [接管] 房间名解析失败但人数已达标{players_now}/{min_players}, 直接开赛", flush=True)
-                    res = self._try_start(room_id, room_level, "接管人数达标")
-                    if res is True:
+                    print(f"  [接管] 房间名解析失败但人数已达标{players_now}/{min_players}, 循环尝试开赛", flush=True)
+                    ret = self._try_start_until_reclaimed(room_id, room_level)
+                    if ret == "started":
                         dc = DecisionClient(self.timeout)
                         self.flip_loop(room_id, room_level, dc=dc)
                         return True
-                    if res is False:
-                        return False
+                    return ret
                 print("  [接管] 无法获取房间名, 拒绝开赛, 等待下次接管", flush=True)
                 return False
             wait_sec = (target_time - self._now()).total_seconds()
