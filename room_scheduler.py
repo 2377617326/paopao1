@@ -328,11 +328,25 @@ class Scheduler:
         return found
 
     def room_status(self, room_id, room_level):
-        """读取房间人数 返回 (当前人数, 上限) 或 (None, None)"""
+        """读取房间人数 返回 (当前人数, 上限) 或 (None, None).
+        用更精确的正则匹配「当前/上限」人数, 避免误抓页面里其它 数字/数字
+        (如日期 2026/08、页码 1/3 等) 而影响「提前开」的人数判断.
+        优先匹配带上下文锚点(人数/在线/已入…)或人数单位的写法;
+        以上都不中时再退回原始的宽松启发式, 保证兼容."""
         try:
             html = self._get("/room/gotoJoinRoom",
                              userId=self.user_id, roomLevelId=room_level, roomId=room_id)
-            m = re.search(r"(\d+)/(\d+)", html)
+            # 精确优先: 锚定人数语义上下文或单位, 排除日期/页码等无关 数字/数字
+            for pat in [
+                r'(?:当前人数|当前|人数|在线|已入|参加|已有|报名)\s*[:：]?\s*[^0-9]{0,6}(\d+)\s*/\s*(\d+)',
+                r'(\d+)\s*/\s*(\d+)\s*人',
+                r'(\d+)\s*/\s*(\d+)\s*位',
+            ]:
+                m = re.search(pat, html)
+                if m:
+                    return int(m.group(1)), int(m.group(2))
+            # 兜底: 原始宽松启发式(无上下文时保持兼容)
+            m = re.search(r"(\d+)\s*/\s*(\d+)", html)
             if m:
                 return int(m.group(1)), int(m.group(2))
         except Exception:
