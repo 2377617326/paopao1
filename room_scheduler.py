@@ -368,66 +368,33 @@ class Scheduler:
         return False
 
     def _get_room_block(self, room_id, room_level):
-        """获取房间HTML块(含房号). 兼容多种卡片div结构"""
+        """获取房间HTML块"""
         try:
             html = self._get("/room/gotoAddRoom", userId=self.user_id, roomLevelId=room_level)
-        except Exception:
-            return ""
-        # 尝试多种卡片分隔符
-        separators = [
-            r'<div class="col-11 px-2 mb-3 room-list-item">',
-            r'<div[^>]*class="[^"]*room-list-item[^"]*"[^>]*>',
-            r'<div class="col-11[^"]*"[^>]*>',
-        ]
-        for sep in separators:
-            parts = re.split(sep, html)
-            if len(parts) < 2:
-                continue
-            for block in parts[1:]:
-                if f"'{room_id}'" in block:
+            for block in re.split(r'<div class="col-11 px-2 mb-3 room-list-item">', html):
+                if str(room_id) in block:
                     return block
-        # 兜底: 直接在全文里找含该房号的区间
-        idx = html.find(f"'{room_id}'")
-        if idx >= 0:
-            return html[max(0, idx - 2000): idx + 2000]
+        except Exception:
+            pass
         return ""
 
-    def _get_room_name(self, room_id, room_level, max_retries=5):
-        """从HTML提取房间名, 失败重试. 返回房间名或"""
-        for attempt in range(max_retries):
+    def _get_room_name(self, room_id, room_level):
+        """从HTML提取房间名, 失败重试5次"""
+        for attempt in range(5):
             block = self._get_room_block(room_id, room_level)
-            name = self._extract_name_from_block(block)
-            if name:
-                return name
-            if attempt == 0:
-                print(f"  [房间名] 房号{room_id} 第{attempt+1}次未能从HTML提取房间名(block长度{len(block)}), 重试...", flush=True)
-            if attempt < max_retries - 1:
+            if block:
+                # 尝试多种匹配模式
+                for pattern in [
+                    r'房间名称[：:]\s*([^<]+)',
+                    r'class="room[^"]*name[^"]*"[^>]*>([^<]+)',
+                    r'自动测试\d{1,2}:\d{2}开',
+                    r'尔尔定时[^\s<]+',
+                ]:
+                    m = re.search(pattern, block)
+                    if m:
+                        return m.group(0).strip() if not m.lastindex else m.group(1).strip()
+            if attempt < 4:
                 time.sleep(3)
-        print(f"  [房间名] 房号{room_id} 多次提取房间名失败!", flush=True)
-        return ""
-
-    def _extract_name_from_block(self, block):
-        """从房间HTML块中提取房间名, 兼容多种标签写法"""
-        if not block:
-            return ""
-        patterns = [
-            r'房间名称\s*[：:]?\s*([^<\r\n]+)',
-            r'房间名\s*[：:]?\s*([^<\r\n]+)',
-            r'名称\s*[：:]\s*([^<\r\n]+)',
-        ]
-        for p in patterns:
-            m = re.search(p, block)
-            if m:
-                val = m.group(1).strip()
-                if val and re.search(r'\d{1,2}:\d{2}', val):
-                    return val
-        # 兜底: 直接找形如 自动测试HH:MM开 的文本
-        m = re.search(r'(\S*自动测试\s*\d{1,2}:\d{2}开\S*)', block)
-        if m:
-            return m.group(1).strip()
-        m = re.search(r'(\d{1,2}:\d{2}开)', block)
-        if m:
-            return ROOM_NAME_MARK + " " + m.group(1)
         return ""
 
     def _parse_start_time_from_name(self, room_name):
@@ -647,23 +614,18 @@ class Scheduler:
         if self.is_room_started(room_id, room_level):
             print("  [接管] 房间已开始, 进入翻期轮询", flush=True)
         else:
-            # 从房间名解析开赛时间, 等到时间再开.
-            # 关键: 若无法确定开赛时间, 绝不能提前开赛, 需持续重试解析房间名,
-            # 直到拿到明确的开赛时间(或房间名已过点)为止.
+            # 从房间名解析开赛时间, 等到时间再开
             target_time = None
-            room_name = ""
-            retry = 0
-            while target_time is None:
-                room_name = self._get_room_name(room_id, room_level, max_retries=3)
+            for attempt in range(10):
+                room_name = self._get_room_name(room_id, room_level)
                 target_time = self._parse_start_time_from_name(room_name)
-                if target_time is not None:
+                if target_time:
                     break
-                retry += 1
-                if retry > 30:
-                    print(f"  [接管] 房号{room_id} 长时间无法确定开赛时间({room_name!r}), 放弃开赛, 交给下个job", flush=True)
-                    return False
-                print(f"  [接管] 房号{room_id} 无法从房间名确定开赛时间, {10}s后重试解析...", flush=True)
+                print(f"  [接管] 第{attempt+1}次获取房间名失败[{room_name}], 10s后重试", flush=True)
                 time.sleep(10)
+            if not target_time:
+                print("  [接管] 无法获取房间名, 拒绝开赛, 等待下次接管", flush=True)
+                return False
             wait_sec = (target_time - self._now()).total_seconds()
             if wait_sec > 0:
                 print(f"  [接管] 房间名[{room_name}] 开赛时间{target_time.strftime('%H:%M')}, 等待{wait_sec/60:.0f}分钟", flush=True)
