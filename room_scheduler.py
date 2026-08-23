@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 数据营销决策分析竞赛平台 - 全自动调度器 (可恢复版)
-时间段建房策略 + 满n开/40min强开 + 每20min自动翻期 + 自动结束
+时间段建房策略 + 按房间名定时开赛 + 每20min自动翻期 + 自动结束
 
 时间线 (北京时间):
   08:00-09:00  只建 牛刀小试
@@ -361,6 +361,36 @@ class Scheduler:
             pass
         return False
 
+    def _get_room_block(self, room_id, room_level):
+        """获取房间HTML块"""
+        try:
+            html = self._get("/room/gotoAddRoom", userId=self.user_id, roomLevelId=room_level)
+            for block in re.split(r'<div class="col-11 px-2 mb-3 room-list-item">', html):
+                if f"'{room_id}'" in block:
+                    return block
+        except Exception:
+            pass
+        return ""
+
+    def _get_room_name(self, room_id, room_level):
+        """从HTML提取房间名"""
+        block = self._get_room_block(room_id, room_level)
+        m = re.search(r'房间名称[：:]\s*([^<]+)', block)
+        return m.group(1).strip() if m else ""
+
+    def _parse_start_time_from_name(self, room_name):
+        """从房间名解析开赛时间(HH:MM), 返回datetime或None"""
+        m = re.search(r'(\d{1,2}:\d{2})开', room_name)
+        if not m:
+            return None
+        h, mi = map(int, m.group(1).split(':'))
+        now = self._now()
+        target = now.replace(hour=h, minute=mi, second=0, microsecond=0)
+        # 如果目标时间已过, 说明是明天的(不太可能)或刚过, 直接开
+        if target <= now:
+            return now
+        return target
+
     def start_exp(self, room_id, room_level):
         return self._post("/room/startRoomExp", type="1", roomId=room_id, userId=self.user_id)
 
@@ -550,7 +580,7 @@ class Scheduler:
 
     def handle_room(self, room_id, room_level):
         """处理一个房间的完整生命周期(开始->翻期->结束).
-        用页面状态判断是否已开始, 不再用next_period测试(避免重复翻期).
+        从房间名解析开赛时间, 等到时间再开始.
         """
         level = LEVELS[room_level]
         n = level["full_n"]
@@ -563,8 +593,18 @@ class Scheduler:
         if self.is_room_started(room_id, room_level):
             print("  [接管] 房间已开始, 进入翻期轮询", flush=True)
         else:
-            # 房间未开始, 无限重试start_exp直到开始或解散(不检查时限)
-            print(f"  [接管] 房间未开始, 循环尝试start_exp", flush=True)
+            # 从房间名解析开赛时间, 等到时间再开
+            room_name = self._get_room_name(room_id, room_level)
+            target_time = self._parse_start_time_from_name(room_name)
+            if target_time:
+                wait_sec = (target_time - self._now()).total_seconds()
+                if wait_sec > 0:
+                    print(f"  [接管] 房间名[{room_name}] 开赛时间{target_time.strftime('%H:%M')}, 等待{wait_sec/60:.0f}分钟", flush=True)
+                    while self._now() < target_time:
+                        time.sleep(min(30, wait_sec))
+                        wait_sec = (target_time - self._now()).total_seconds()
+            # 等待结束, 开始循环start_exp
+            print(f"  [接管] 到点, 循环尝试start_exp", flush=True)
             while True:
                 self.start_exp(room_id, room_level)
                 time.sleep(5)
