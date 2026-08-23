@@ -373,10 +373,15 @@ class Scheduler:
         return ""
 
     def _get_room_name(self, room_id, room_level):
-        """从HTML提取房间名"""
-        block = self._get_room_block(room_id, room_level)
-        m = re.search(r'房间名称[：:]\s*([^<]+)', block)
-        return m.group(1).strip() if m else ""
+        """从HTML提取房间名, 失败重试3次"""
+        for attempt in range(3):
+            block = self._get_room_block(room_id, room_level)
+            m = re.search(r'房间名称[：:]\s*([^<]+)', block)
+            if m:
+                return m.group(1).strip()
+            if attempt < 2:
+                time.sleep(3)
+        return ""
 
     def _parse_start_time_from_name(self, room_name):
         """从房间名解析开赛时间(HH:MM), 返回datetime或None"""
