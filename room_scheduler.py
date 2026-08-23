@@ -368,11 +368,13 @@ class Scheduler:
         return False
 
     def _get_room_block(self, room_id, room_level):
-        """获取房间HTML块"""
+        """获取房间HTML块. 用 gotoJoinRoom('uid','lv','room_id') 精确定位房号,
+        避免 str(room_id) in block 的子串误匹配(如 5555 误匹配到 55555 房间)."""
         try:
             html = self._get("/room/gotoAddRoom", userId=self.user_id, roomLevelId=room_level)
+            pat = r"gotoJoinRoom\('\d+','\d+','" + str(room_id) + r"'\)"
             for block in re.split(r'<div class="col-11 px-2 mb-3 room-list-item">', html):
-                if str(room_id) in block:
+                if re.search(pat, block):
                     return block
         except Exception:
             pass
@@ -387,6 +389,7 @@ class Scheduler:
                 for pattern in [
                     r'房间名称[：:]\s*([^<]+)',
                     r'class="room[^"]*name[^"]*"[^>]*>([^<]+)',
+                    r'<h6[^>]*>([^<]+)</h6>',
                     r'自动测试\d{1,2}:\d{2}开',
                     r'尔尔定时[^\s<]+',
                 ]:
