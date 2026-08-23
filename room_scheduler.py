@@ -472,16 +472,18 @@ class Scheduler:
         return True, room_id
 
     def wait_and_start(self, room_id, room_level, n, created_at):
-        """等40分钟后强制开始"""
-        force_time = created_at + dt.timedelta(minutes=FORCE_START_AFTER)
-        print(f"  [等待] 房号{room_id} 等到 {force_time.strftime('%H:%M')} 开始", flush=True)
-        while self._now() < force_time:
-            players, maxp = self.room_status(room_id, room_level)
-            if players is None:
-                print(f"  [检测] 获取人数失败, {POLL_INTERVAL}s后重试", flush=True)
-            else:
-                print(f"  [检测] {self._now().strftime('%H:%M:%S')} 人数 {players}/{maxp}", flush=True)
-            time.sleep(POLL_INTERVAL)
+        """从房间名解析开赛时间, 等到时间再开始"""
+        room_name = self._get_room_name(room_id, room_level)
+        target_time = self._parse_start_time_from_name(room_name)
+        if not target_time:
+            # 降级: 用40分钟计算
+            target_time = created_at + dt.timedelta(minutes=FORCE_START_AFTER)
+        wait_sec = (target_time - self._now()).total_seconds()
+        if wait_sec > 0:
+            print(f"  [等待] 房号{room_id} [{room_name}] 开赛{target_time.strftime('%H:%M')}, 等{wait_sec/60:.0f}分钟", flush=True)
+            while self._now() < target_time:
+                time.sleep(min(30, max(1, wait_sec)))
+                wait_sec = (target_time - self._now()).total_seconds()
         print(f"  [强制] 到点, 强制开始", flush=True)
         while True:
             self.start_exp(room_id, room_level)
