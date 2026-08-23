@@ -34,21 +34,18 @@ jobs:
         run: |
           python room_scheduler.py --login "$BOT_USER" "$BOT_PASS"
 
-      - name: 自动重启(工作时间内)
+      - name: 自动重启(全天运行, 夜间检查遗漏房间)
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          HOUR_BJ=$(( ($(date -u +%H) + 8) % 24 ))
-          if [ $HOUR_BJ -ge 8 ] && [ $HOUR_BJ -lt 24 ]; then
-            echo "北京时间 ${HOUR_BJ}:00, 仍在工作时间, 30秒后自动重启..."
-            sleep 30
-            curl -s -X POST \
-              -H "Authorization: token $GH_TOKEN" \
-              -H "Accept: application/vnd.github.v3+json" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/workflows/room_bot.yml/dispatches" \
-              -d '{"ref":"main"}'
-            echo "已触发新run"
-          else
-            echo "北京时间 ${HOUR_BJ}:00, 非工作时间, 不重启"
-          fi
+          # 全天24小时都重启: 08:00-22:00 建房+处理房间,
+          # 22:00-08:00 不建房, 仅检查并处理遗漏(未结束)房间
+          echo "北京时间 $(($(( $(date -u +%H) + 8) % 24 ))):00, 30秒后自动重启..."
+          sleep 30
+          curl -s -X POST \
+            -H "Authorization: token $GH_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/workflows/room_bot.yml/dispatches" \
+            -d '{"ref":"main"}'
+          echo "已触发新run"
