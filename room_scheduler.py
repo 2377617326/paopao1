@@ -432,6 +432,33 @@ class Scheduler:
         # 已开始的房间再调start返回500(JSON含"status":500)
         return "500" in str(resp2)
 
+    def _try_start_until_reclaimed(self, room_id, room_level):
+        """到点后不断尝试开赛, 直到房间真正开始或房间被平台收回.
+        返回: "started"=房间已开始; "reclaimed"=房间被收回/解散(需重新建房); "failed"=无法确定/接近时限退出.
+        平台 startRoomExp 返回: 1=成功, 2=人数不足(需>=3人), 9=房间已开始.
+        只要未开始就持续重试(到点前人数已达标时, 平台仍需在到点瞬间>=3人才开),
+        直至房间被收回(room_status 返回 None, 即房间从列表消失/已解散).
+        """
+        while True:
+            # 接近job时限, 退出交给下个job继续尝试/接管
+            if self._time_left() < 600:
+                print("  [开赛] 接近job时限, 退出交给下个job", flush=True)
+                return "failed"
+            resp = self.start_exp(room_id, room_level)
+            print(f"  [开赛] startRoomExp 返回: {resp}", flush=True)
+            time.sleep(5)
+            if self.is_room_started(room_id, room_level):
+                print("  [确认] 房间已开始!", flush=True)
+                return "started"
+            players, maxp = self.room_status(room_id, room_level)
+            if players is None:
+                # room_status 返回 None 表示房间在列表消失/已解散 -> 平台已收回房间
+                print("  [收回] 房间已被平台收回/解散, 需要重新建房", flush=True)
+                return "reclaimed"
+            # 未开始也未收回 -> 持续重试
+            print(f"  [重试] 未开始(人数{players}/{maxp}), 10s后重试...", flush=True)
+            time.sleep(10)
+
     def next_period(self, room_id, room_level):
         return self._post("/room/startRoomExp", type="2", roomId=room_id, userId=self.user_id)
 
@@ -507,18 +534,7 @@ class Scheduler:
                 time.sleep(min(30, max(1, wait_sec)))
                 wait_sec = (target_time - self._now()).total_seconds()
         print(f"  [强制] 到点, 强制开始", flush=True)
-        while True:
-            self.start_exp(room_id, room_level)
-            time.sleep(5)
-            if self.is_room_started(room_id, room_level):
-                print("  [确认] 房间已开始!", flush=True)
-                return True
-            players, maxp = self.room_status(room_id, room_level)
-            if players is None:
-                print("  [结束] 房间已解散", flush=True)
-                return False
-            print(f"  [重试] 未开始(人数{players}/{maxp}), 10s后重试...", flush=True)
-            time.sleep(10)
+        return self._try_start_until_reclaimed(room_id, room_level)
 
     def _get_current_period(self, room_id, dc):
         """从9001登录获取当前期数, 用于重启后恢复"""
@@ -642,18 +658,9 @@ class Scheduler:
                     wait_sec = (target_time - self._now()).total_seconds()
             # 等待结束, 开始循环start_exp
             print(f"  [接管] 到点, 循环尝试start_exp", flush=True)
-            while True:
-                self.start_exp(room_id, room_level)
-                time.sleep(5)
-                if self.is_room_started(room_id, room_level):
-                    print("  [确认] 房间已开始!", flush=True)
-                    break
-                players2, _ = self.room_status(room_id, room_level)
-                if players2 is None:
-                    print("  [结束] 房间已解散", flush=True)
-                    return False
-                print(f"  [重试] 未开始(人数{players2}), 15s后重试...", flush=True)
-                time.sleep(10)
+            ret = self._try_start_until_reclaimed(room_id, room_level)
+            if ret != "started":
+                return ret
         dc = DecisionClient(self.timeout)
         self.flip_loop(room_id, room_level, dc=dc)
         return True
@@ -742,10 +749,15 @@ class Scheduler:
             print(f"  [建房] 成功! 房号{room_id}", flush=True)
             # 新房: 按房间名时间开赛, 然后翻期结束
             n = LEVELS[room_level]["full_n"]
-            started = self.wait_and_start(room_id, room_level, n, created_at)
-            if started:
+            status = self.wait_and_start(room_id, room_level, n, created_at)
+            if status == "started":
                 dc = DecisionClient(self.timeout)
                 self.flip_loop(room_id, room_level, dc=dc)
+            elif status == "reclaimed":
+                # 房间被平台收回/解散, 直接重新建房
+                print(f"  [建房] 房号{room_id}已被收回, 立即重新建房", flush=True)
+                continue
+            # status in ("failed", False): 交给下个job继续尝试/接管
 
     def pick_level(self, primary, secondary):
         """主/次/默认选择场次. 主满->试次, 次满->默认牛刀小试"""
