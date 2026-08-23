@@ -9,8 +9,8 @@
   12:00-14:00  只建 牛刀小试
   14:00-17:00  主 锋芒毕露 次 牛刀小试
   17:00-20:00  主 群雄争霸 次 锋芒毕露
-  20:00-22:00  默认建 牛刀小试
-  22:00后      不再新建, 等最后一局结束后收工
+  20:00-24:00  默认建 牛刀小试
+  00:00后      不再新建, 等最后一局结束后收工
 
 建房参数: 4季度, 每周期20分钟, 密码123, 其余默认
 房间名: 尔尔定时比赛q群5342744003（满{n}开）不满{HH:MM}开
@@ -63,7 +63,7 @@ TOTAL_PERIOD = 4          # 4季度
 PERIOD_LENGTH = 20        # 每周期20分钟 (翻期间隔)
 ROOM_PASSWORD = "123"
 FORCE_START_AFTER = 40    # 建房后40分钟强制开始
-START_LIMIT_HOUR = 22     # 22点后不再新建房间
+START_LIMIT_HOUR = 24     # 00:00(24点)后不再新建房间
 POLL_INTERVAL = 15        # 轮询秒数
 MAX_JOB_RUNTIME = 1.9 * 60 * 60  # 每2小时cron, 留余量提前退出交给下个job
 FLIP_RETRY = 3            # 翻期失败重试次数
@@ -405,7 +405,12 @@ class Scheduler:
         h, mi = map(int, m.group(1).split(':'))
         now = self._now()
         target = now.replace(hour=h, minute=mi, second=0, microsecond=0)
-        # 如果目标时间已过, 说明是明天的(不太可能)或刚过, 直接开
+        # 跨午夜房间名: 开工时间为 08:00 后, 若解析出 00:00~07:59 且已过, 且当前处于白天/晚上
+        # (>=8点), 说明该房间是昨晚(如23:30建房)开赛时间落在次日凌晨, 需顺延到明天
+        # 若当前本身就是凌晨(<8点)且目标已过, 则是今天凌晨该开而未开的旧房, 立即开
+        if target <= now and h < 8 and now.hour >= 8:
+            target += dt.timedelta(days=1)
+        # 正常操作时段(08:00 后)的目标时间已过, 说明刚过或已过点, 直接开
         if target <= now:
             return now
         return target
@@ -669,8 +674,8 @@ class Scheduler:
             # 1. 先检查时间, 决定建房类型
             plan = self.plan_level()
             if plan is None:
-                # 已过22点, 只处理未结束的房间
-                print(f"[{now.strftime('%H:%M')}] 已过{START_LIMIT_HOUR}点, 检查未结束房间...", flush=True)
+                # 已过00:00, 只处理未结束的房间
+                print(f"[{now.strftime('%H:%M')}] 已过{START_LIMIT_HOUR}点(00:00), 检查未结束房间...", flush=True)
                 own = self.find_own_rooms()
                 if own:
                     for lv, rid in own.items():

@@ -40,7 +40,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           HOUR_BJ=$(( ($(date -u +%H) + 8) % 24 ))
-          if [ $HOUR_BJ -ge 8 ] && [ $HOUR_BJ -lt 22 ]; then
+          if [ $HOUR_BJ -ge 8 ] && [ $HOUR_BJ -lt 24 ]; then
             echo "北京时间 ${HOUR_BJ}:00, 仍在工作时间, 30秒后自动重启..."
             sleep 30
             curl -s -X POST \
