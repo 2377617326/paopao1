@@ -31,9 +31,15 @@ import os
 import re
 import sys
 import time
+import signal
 import urllib.parse
 
 import requests
+
+def _sigterm_exit(sig, frame):
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, _sigterm_exit)
 
 if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
