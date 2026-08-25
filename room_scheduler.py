@@ -10,7 +10,7 @@
   14:00-17:00  主 锋芒毕露 次 牛刀小试
   17:00-20:00  主 群雄争霸 次 锋芒毕露
   20:00-22:00  默认建 牛刀小试
-  22:00后      不再新建, 仅检查是否有遗漏(未结束)房间并处理
+  22:00后      不再新建, 等最后一局结束后收工
 
 建房参数: 4季度, 每周期20分钟, 密码123, 其余默认
 房间名: 尔尔定时比赛q群5342744003（满{n}开）不满{HH:MM}开
@@ -63,7 +63,7 @@ TOTAL_PERIOD = 4          # 4季度
 PERIOD_LENGTH = 20        # 每周期20分钟 (翻期间隔)
 ROOM_PASSWORD = "123"
 FORCE_START_AFTER = 40    # 建房后40分钟强制开始
-START_LIMIT_HOUR = 22     # 22:00后不再新建房间, 仅检查遗漏房间
+START_LIMIT_HOUR = 22     # 22点后不再新建房间
 POLL_INTERVAL = 15        # 轮询秒数
 MAX_JOB_RUNTIME = 1.9 * 60 * 60  # 每2小时cron, 留余量提前退出交给下个job
 FLIP_RETRY = 3            # 翻期失败重试次数
@@ -74,7 +74,7 @@ BASE_9001 = os.environ.get("BASE_9001", "http://121.42.10.114:9001")
 # 参赛账号: (用户名, 密码)
 # 唯一账号: 自动-1
 ALL_ACCOUNTS = [
-    ("自动-1", "321"),
+    ("自动房间-1", "321"),
 ]
 
 
@@ -328,25 +328,11 @@ class Scheduler:
         return found
 
     def room_status(self, room_id, room_level):
-        """读取房间人数 返回 (当前人数, 上限) 或 (None, None).
-        用更精确的正则匹配「当前/上限」人数, 避免误抓页面里其它 数字/数字
-        (如日期 2026/08、页码 1/3 等) 而影响「提前开」的人数判断.
-        优先匹配带上下文锚点(人数/在线/已入…)或人数单位的写法;
-        以上都不中时再退回原始的宽松启发式, 保证兼容."""
+        """读取房间人数 返回 (当前人数, 上限) 或 (None, None)"""
         try:
             html = self._get("/room/gotoJoinRoom",
                              userId=self.user_id, roomLevelId=room_level, roomId=room_id)
-            # 精确优先: 锚定人数语义上下文或单位, 排除日期/页码等无关 数字/数字
-            for pat in [
-                r'(?:当前人数|当前|人数|在线|已入|参加|已有|报名)\s*[:：]?\s*[^0-9]{0,6}(\d+)\s*/\s*(\d+)',
-                r'(\d+)\s*/\s*(\d+)\s*人',
-                r'(\d+)\s*/\s*(\d+)\s*位',
-            ]:
-                m = re.search(pat, html)
-                if m:
-                    return int(m.group(1)), int(m.group(2))
-            # 兜底: 原始宽松启发式(无上下文时保持兼容)
-            m = re.search(r"(\d+)\s*/\s*(\d+)", html)
+            m = re.search(r"(\d+)/(\d+)", html)
             if m:
                 return int(m.group(1)), int(m.group(2))
         except Exception:
@@ -382,13 +368,11 @@ class Scheduler:
         return False
 
     def _get_room_block(self, room_id, room_level):
-        """获取房间HTML块. 用 gotoJoinRoom('uid','lv','room_id') 精确定位房号,
-        避免 str(room_id) in block 的子串误匹配(如 5555 误匹配到 55555 房间)."""
+        """获取房间HTML块"""
         try:
             html = self._get("/room/gotoAddRoom", userId=self.user_id, roomLevelId=room_level)
-            pat = r"gotoJoinRoom\('\d+','\d+','" + str(room_id) + r"'\)"
             for block in re.split(r'<div class="col-11 px-2 mb-3 room-list-item">', html):
-                if re.search(pat, block):
+                if str(room_id) in block:
                     return block
         except Exception:
             pass
@@ -403,7 +387,6 @@ class Scheduler:
                 for pattern in [
                     r'房间名称[：:]\s*([^<]+)',
                     r'class="room[^"]*name[^"]*"[^>]*>([^<]+)',
-                    r'<h6[^>]*>([^<]+)</h6>',
                     r'自动测试\d{1,2}:\d{2}开',
                     r'尔尔定时[^\s<]+',
                 ]:
@@ -422,12 +405,7 @@ class Scheduler:
         h, mi = map(int, m.group(1).split(':'))
         now = self._now()
         target = now.replace(hour=h, minute=mi, second=0, microsecond=0)
-        # 跨午夜房间名: 开工时间为 08:00 后, 若解析出 00:00~07:59 且已过, 且当前处于白天/晚上
-        # (>=8点), 说明该房间是昨晚(如23:30建房)开赛时间落在次日凌晨, 需顺延到明天
-        # 若当前本身就是凌晨(<8点)且目标已过, 则是今天凌晨该开而未开的旧房, 立即开
-        if target <= now and h < 8 and now.hour >= 8:
-            target += dt.timedelta(days=1)
-        # 正常操作时段(08:00 后)的目标时间已过, 说明刚过或已过点, 直接开
+        # 如果目标时间已过, 说明是明天的(不太可能)或刚过, 直接开
         if target <= now:
             return now
         return target
@@ -445,33 +423,6 @@ class Scheduler:
         resp2 = self.start_exp(room_id, room_level)
         # 已开始的房间再调start返回500(JSON含"status":500)
         return "500" in str(resp2)
-
-    def _try_start_until_reclaimed(self, room_id, room_level):
-        """到点后不断尝试开赛, 直到房间真正开始或房间被平台收回.
-        返回: "started"=房间已开始; "reclaimed"=房间被收回/解散(需重新建房); "failed"=无法确定/接近时限退出.
-        平台 startRoomExp 返回: 1=成功, 2=人数不足(需>=3人), 9=房间已开始.
-        只要未开始就持续重试(到点前人数已达标时, 平台仍需在到点瞬间>=3人才开),
-        直至房间被收回(room_status 返回 None, 即房间从列表消失/已解散).
-        """
-        while True:
-            # 接近job时限, 退出交给下个job继续尝试/接管
-            if self._time_left() < 600:
-                print("  [开赛] 接近job时限, 退出交给下个job", flush=True)
-                return "failed"
-            resp = self.start_exp(room_id, room_level)
-            print(f"  [开赛] startRoomExp 返回: {resp}", flush=True)
-            time.sleep(5)
-            if self.is_room_started(room_id, room_level):
-                print("  [确认] 房间已开始!", flush=True)
-                return "started"
-            players, maxp = self.room_status(room_id, room_level)
-            if players is None:
-                # room_status 返回 None 表示房间在列表消失/已解散 -> 平台已收回房间
-                print("  [收回] 房间已被平台收回/解散, 需要重新建房", flush=True)
-                return "reclaimed"
-            # 未开始也未收回 -> 持续重试
-            print(f"  [重试] 未开始(人数{players}/{maxp}), 10s后重试...", flush=True)
-            time.sleep(10)
 
     def next_period(self, room_id, room_level):
         return self._post("/room/startRoomExp", type="2", roomId=room_id, userId=self.user_id)
@@ -534,22 +485,8 @@ class Scheduler:
         print(f"  [建房] 成功! 场次{room_level}({level['name']}) 房号{room_id} 名[{name}]", flush=True)
         return True, room_id
 
-    def _try_start(self, room_id, room_level, reason):
-        """尝试开赛并确认是否成功. 返回 True=已开始, False=已解散/收回, None=未开始待重试"""
-        resp = self.start_exp(room_id, room_level)
-        time.sleep(5)
-        if self.is_room_started(room_id, room_level):
-            print(f"  [确认] 房间已开始! (触发: {reason}, start返回[{resp}])", flush=True)
-            return True
-        players, maxp = self.room_status(room_id, room_level)
-        if players is None:
-            print(f"  [结束] 房间已解散/收回 (触发: {reason})", flush=True)
-            return False
-        print(f"  [未开] {reason} 后仍未开始(人数{players}/{maxp}, start返回[{resp}]), 稍后重试", flush=True)
-        return None
-
     def wait_and_start(self, room_id, room_level, n, created_at):
-        """从房间名解析开赛时间, 等到时间再开始. 铁律: 无论人数多少, 一律等到开赛时间才开, 绝不提前."""
+        """从房间名解析开赛时间, 等到时间再开始"""
         room_name = self._get_room_name(room_id, room_level)
         target_time = self._parse_start_time_from_name(room_name)
         if not target_time:
@@ -557,12 +494,23 @@ class Scheduler:
             target_time = created_at + dt.timedelta(minutes=FORCE_START_AFTER)
         wait_sec = (target_time - self._now()).total_seconds()
         if wait_sec > 0:
-            print(f"  [等待] 房号{room_id} [{room_name}] 开赛{target_time.strftime('%H:%M')}, 等{wait_sec/60:.0f}分钟(绝不提前开, 人数再多也等到点)", flush=True)
+            print(f"  [等待] 房号{room_id} [{room_name}] 开赛{target_time.strftime('%H:%M')}, 等{wait_sec/60:.0f}分钟", flush=True)
             while self._now() < target_time:
                 time.sleep(min(30, max(1, wait_sec)))
                 wait_sec = (target_time - self._now()).total_seconds()
         print(f"  [强制] 到点, 强制开始", flush=True)
-        return self._try_start_until_reclaimed(room_id, room_level)
+        while True:
+            self.start_exp(room_id, room_level)
+            time.sleep(5)
+            if self.is_room_started(room_id, room_level):
+                print("  [确认] 房间已开始!", flush=True)
+                return True
+            players, maxp = self.room_status(room_id, room_level)
+            if players is None:
+                print("  [结束] 房间已解散", flush=True)
+                return False
+            print(f"  [重试] 未开始(人数{players}/{maxp}), 10s后重试...", flush=True)
+            time.sleep(10)
 
     def _get_current_period(self, room_id, dc):
         """从9001登录获取当前期数, 用于重启后恢复"""
@@ -676,20 +624,28 @@ class Scheduler:
                 print(f"  [接管] 第{attempt+1}次获取房间名失败[{room_name}], 10s后重试", flush=True)
                 time.sleep(10)
             if not target_time:
-                # 房间名解析失败: 无法确定开赛时间, 为绝不提前开, 拒绝开赛并交给下个job重试
-                print("  [接管] 无法获取房间名/开赛时间, 拒绝开赛(绝不提前开), 等待下次接管", flush=True)
+                print("  [接管] 无法获取房间名, 拒绝开赛, 等待下次接管", flush=True)
                 return False
             wait_sec = (target_time - self._now()).total_seconds()
             if wait_sec > 0:
-                print(f"  [接管] 房间名[{room_name}] 开赛时间{target_time.strftime('%H:%M')}, 等待{wait_sec/60:.0f}分钟(绝不提前开, 人数再多也等到点)", flush=True)
+                print(f"  [接管] 房间名[{room_name}] 开赛时间{target_time.strftime('%H:%M')}, 等待{wait_sec/60:.0f}分钟", flush=True)
                 while self._now() < target_time:
                     time.sleep(min(30, max(1, wait_sec)))
                     wait_sec = (target_time - self._now()).total_seconds()
             # 等待结束, 开始循环start_exp
             print(f"  [接管] 到点, 循环尝试start_exp", flush=True)
-            ret = self._try_start_until_reclaimed(room_id, room_level)
-            if ret != "started":
-                return ret
+            while True:
+                self.start_exp(room_id, room_level)
+                time.sleep(5)
+                if self.is_room_started(room_id, room_level):
+                    print("  [确认] 房间已开始!", flush=True)
+                    break
+                players2, _ = self.room_status(room_id, room_level)
+                if players2 is None:
+                    print("  [结束] 房间已解散", flush=True)
+                    return False
+                print(f"  [重试] 未开始(人数{players2}), 15s后重试...", flush=True)
+                time.sleep(10)
         dc = DecisionClient(self.timeout)
         self.flip_loop(room_id, room_level, dc=dc)
         return True
@@ -713,8 +669,8 @@ class Scheduler:
             # 1. 先检查时间, 决定建房类型
             plan = self.plan_level()
             if plan is None:
-                # 非建房时段(22:00后), 不建新房, 仅检查是否有遗漏(未结束)房间并处理
-                print(f"[{now.strftime('%H:%M')}] 已过{START_LIMIT_HOUR}点, 非建房时段, 仅检查遗漏房间...", flush=True)
+                # 已过22点, 只处理未结束的房间
+                print(f"[{now.strftime('%H:%M')}] 已过{START_LIMIT_HOUR}点, 检查未结束房间...", flush=True)
                 own = self.find_own_rooms()
                 if own:
                     for lv, rid in own.items():
@@ -778,15 +734,10 @@ class Scheduler:
             print(f"  [建房] 成功! 房号{room_id}", flush=True)
             # 新房: 按房间名时间开赛, 然后翻期结束
             n = LEVELS[room_level]["full_n"]
-            status = self.wait_and_start(room_id, room_level, n, created_at)
-            if status == "started":
+            started = self.wait_and_start(room_id, room_level, n, created_at)
+            if started:
                 dc = DecisionClient(self.timeout)
                 self.flip_loop(room_id, room_level, dc=dc)
-            elif status == "reclaimed":
-                # 房间被平台收回/解散, 直接重新建房
-                print(f"  [建房] 房号{room_id}已被收回, 立即重新建房", flush=True)
-                continue
-            # status in ("failed", False): 交给下个job继续尝试/接管
 
     def pick_level(self, primary, secondary):
         """主/次/默认选择场次. 主满->试次, 次满->默认牛刀小试"""
