@@ -743,14 +743,16 @@ class Scheduler:
         """主/次/默认选择场次. 主满->试次, 次满->默认牛刀小试"""
         try:
             html = self._get("/room/gotoAddRoom", userId=self.user_id, roomLevelId=primary)
-            if "爆满" not in html:
+            stux_m = re.search(r'var stuX\s*=\s*[\'"](\d+)[\'"]', html)
+            if stux_m and stux_m.group(1) != "0":
                 return primary
         except Exception:
             pass
         print(f"  [场次] 主{LEVELS[primary]['name']} 爆满, 试次{LEVELS[secondary]['name']}")
         try:
             html = self._get("/room/gotoAddRoom", userId=self.user_id, roomLevelId=secondary)
-            if "爆满" not in html:
+            stux_m = re.search(r'var stuX\s*=\s*[\'"](\d+)[\'"]', html)
+            if stux_m and stux_m.group(1) != "0":
                 return secondary
         except Exception:
             pass
