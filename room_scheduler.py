@@ -689,23 +689,27 @@ class Scheduler:
             primary, secondary = plan
             print(f"  计划: 主{LEVELS[primary]['name']} 次{LEVELS[secondary]['name']}", flush=True)
 
-            # 2. 检查是否有自己是房主的未完成房间需要接管
+            # 2. 检查是否有自己是房主的未完成房间需要接管 (仅接管匹配计划level的房间)
             own = self.find_own_rooms()
             print(f"  找到 {len(own)} 个标记房间", flush=True)
+            planned_level = primary if primary == secondary else self.pick_level(primary, secondary)
             if own:
                 has_active = False
                 for lv, rid in own.items():
                     if not self.is_room_finished(rid, lv):
+                        if lv != planned_level:
+                            print(f"[跳过] 场次{lv} 房号{rid} 未结束但不匹配计划{planned_level}, 跳过接管, 将建新房", flush=True)
+                            continue
                         print(f"[接管] 场次{lv} 房号{rid} 未结束, 接管处理", flush=True)
                         self.handle_room(rid, lv)
                         has_active = True
                         break
                 if has_active:
                     continue
-                print("  现有房间均已结束, 建新房", flush=True)
+                print("  现有房间均已结束或不匹配计划, 建新房", flush=True)
 
             # 3. 无进行中房间 -> 按时间计划建房
-            room_level = primary if primary == secondary else self.pick_level(primary, secondary)
+            room_level = planned_level
             print(f"  选定场次: {room_level}({LEVELS[room_level]['name']})", flush=True)
 
             if dry_run:
