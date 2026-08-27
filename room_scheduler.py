@@ -693,20 +693,18 @@ class Scheduler:
             own = self.find_own_rooms()
             print(f"  找到 {len(own)} 个标记房间", flush=True)
             if own:
+                has_active = False
                 for lv, rid in own.items():
                     if not self.is_room_finished(rid, lv):
                         print(f"[接管] 场次{lv} 房号{rid} 未结束, 接管处理", flush=True)
                         self.handle_room(rid, lv)
+                        has_active = True
                         break
-                # 接管结束后继续往下走, 重新判断时间建新房
-                print("  接管结束, 重新判断时间建新房", flush=True)
+                if has_active:
+                    continue
+                print("  现有房间均已结束, 建新房", flush=True)
 
-            # 3. 无进行中房间 -> 按时间计划建房 (重新计算, 接管后时间可能已变)
-            plan = self.plan_level()
-            if plan is None:
-                print("接管后已过建房时段, 收工", flush=True)
-                return True
-            primary, secondary = plan
+            # 3. 无进行中房间 -> 按时间计划建房
             room_level = primary if primary == secondary else self.pick_level(primary, secondary)
             print(f"  选定场次: {room_level}({LEVELS[room_level]['name']})", flush=True)
 
