@@ -13,7 +13,7 @@
   22:00后      不再新建, 等最后一局结束后收工
 
 建房参数: 4季度, 每周期20分钟, 密码123, 其余默认
-房间名: 尔尔定时比赛q群5342744003（满{n}开）不满{HH:MM}开
+房间名: 定时训练赛q群5342744003（满{n}开）不满{HH:MM}开
   满n开 = 人数到n即开始; 不满n人则建房时间+40min强制开始
 翻期: 开始后每20min自动翻一期, 翻完4期自动结束
 
@@ -57,7 +57,7 @@ LEVELS = {
     6: {"name": "八仙过海", "full_n": 10, "min_players": 3},
 }
 
-ROOM_NAME_MARK = os.environ.get("ROOM_NAME_MARK", "尔尔定时比赛q群5342744003")
+ROOM_NAME_MARK = os.environ.get("ROOM_NAME_MARK", "定时训练赛q群5342744003")
 ROOM_NAME_TPL = ROOM_NAME_MARK + " 自动测试{time}开"
 TOTAL_PERIOD = 4          # 4季度
 PERIOD_LENGTH = 20        # 每周期20分钟 (翻期间隔)
