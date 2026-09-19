@@ -284,8 +284,13 @@ class Scheduler:
                 self.session.headers.update({"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
                 print(f"  [登录] 第{attempt+1}次重试...", flush=True)
                 time.sleep(30)
+            # 先GET /login.jsp拿CSRF
+            try:
+                self.session.get(f"{BASE}/login.jsp", timeout=self.timeout)
+            except Exception:
+                pass
             r = self.session.post(f"{BASE}/roomLogin/login",
-                                  data={"loginName": self.username, "loginPass": self.password},
+                                  data={"loginName": self.username, "loginPass": self.password, "type": "2"},
                                   timeout=self.timeout)
             resp = r.text.strip()
             if resp == "1":
