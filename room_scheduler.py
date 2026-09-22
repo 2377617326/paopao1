@@ -147,18 +147,7 @@ class DecisionClient:
                 return p
         return None
 
-    DECISION_TYPES = [
-        (1, "1,1,1,"),
-        (2, "1,1,1,1,1,1,"),
-        (3, "1,1,1,1,1,1,1,1,1,"),
-        (4, "1,1,1,1,1,1,1,1,1,1,1,1,"),
-        (5, "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1"),
-        (6, "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,"),
-        (7, "9999,9999,9999,7999,7999,7999,9999,9999,9999,"),
-        (8, "0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,"),
-    ]
-
-    def submit_decision(self, username, room_id, period_num, uid=None):
+        def submit_decision(self, username, room_id, period_num, uid=None):
         """提交8种决策(type1-8), type8带state=2为最终提交. 返回是否全部成功"""
         if not uid:
             uid = self.get_uid(username)
@@ -172,8 +161,15 @@ class DecisionClient:
         except Exception as e:
             print(f"    [决策] {username} 登录9001失败: {e}")
             return False
+        
+        quarter = period_num
+        n = 8
+        
+        # 生成决策字符串
+        decisions = self._generate_decisions(quarter, n)
+        
         ok = True
-        for typ, sval in self.DECISION_TYPES:
+        for typ, sval in decisions:
             p = {
                 "type": str(typ), "periodNum": str(period_num), "num": str(period_num),
                 "companyId": str(user.get("companyId")), "expId": str(user.get("expId")),
@@ -192,6 +188,151 @@ class DecisionClient:
                 print(f"    [决策] type{typ} 异常: {e}")
                 ok = False
         return ok
+
+    def _generate_decisions(self, quarter, n):
+        """根据季度生成决策列表"""
+        import random
+        
+        # type4
+        type4_str = "9,9,9,1,9,9,9,1,9,9,9,1,"
+        type4_fb = "1,1,1,1,1,1,1,1,1,1,1,1,"
+        
+        # type5
+        salary = random.randint(3900, 4100)
+        commission = round(random.uniform(2.4, 3.15), 2)
+        if quarter == 1:
+            type5_str = "99,99,99,9,9,9,0,0,0,0,0,0,0,0,0,0,0,0,3800,1.5,9,9,9,"
+        elif quarter == 4:
+            alloc_idx = random.choices([0, 1, 2], weights=[5, 80, 15])[0]
+            tv_a, wa, ga = Q4_TIME_ALLOC[alloc_idx]
+            type5_str = (f"99,99,99,{tv_a[0]},{wa[0]},{ga[0]},"
+                         f"0,0,0,0,0,0,0,0,0,0,0,0,"
+                         f"{salary},{commission},9,9,9,")
+        else:
+            alloc_idx = random.choices([0, 1, 2], weights=[80, 15, 5])[0]
+            tv_a, wa, ga = Q2Q3_TIME_ALLOC[alloc_idx]
+            type5_str = (f"99,99,99,{tv_a[0]},{wa[0]},{ga[0]},"
+                         f"0,0,0,0,0,0,0,0,0,0,0,0,"
+                         f"{salary},{commission},9,9,9,")
+        type5_fb = "1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,"
+        
+        # type3
+        tv_total = watch_total = game_total = 0
+        if quarter == 1:
+            tv_east = 1500
+            game_east = 10000
+            watch_east = max(0, int((45000 - 45000 - tv_east * COST_TV
+                                    - game_east * COST_GAME) / COST_WATCH))
+            tv_total = tv_east
+            watch_total = watch_east
+            game_total = game_east
+            type3_str = f"{tv_east},0,0,{watch_east},0,0,{game_east},0,0,"
+        else:
+            if quarter == 2:
+                sc = Q2_SCENARIOS
+            elif quarter == 3:
+                sc = Q3_SCENARIOS
+            else:
+                sc = None
+            if sc:
+                scenario = random.randint(1, 3)
+                pcts = {}
+                for prod in ["tv", "watch", "game"]:
+                    lo, hi = sc[scenario][prod]
+                    pcts[prod] = random.uniform(lo, hi)
+            else:
+                pcts = {}
+                for prod in ["tv", "watch", "game"]:
+                    lo, hi = Q4_RANGES[prod]
+                    pcts[prod] = random.uniform(lo, hi)
+            tv_e = int(FORECAST["tv"]["east"] / n * pcts["tv"])
+            tv_c = int(FORECAST["tv"]["central"] / n * pcts["tv"])
+            tv_w = int(FORECAST["tv"]["west"] / n * pcts["tv"])
+            tv_total = tv_e + tv_c + tv_w
+            wa_e = int(FORECAST["watch"]["east"] / n * pcts["watch"])
+            wa_c = int(FORECAST["watch"]["central"] / n * pcts["watch"])
+            wa_w = int(FORECAST["watch"]["west"] / n * pcts["watch"])
+            watch_total = wa_e + wa_c + wa_w
+            ga_e = int(FORECAST["game"]["east"] / n * pcts["game"])
+            ga_c = int(FORECAST["game"]["central"] / n * pcts["game"])
+            ga_w = int(FORECAST["game"]["west"] / n * pcts["game"])
+            game_total = ga_e + ga_c + ga_w
+            type3_str = (f"{tv_e},{tv_c},{tv_w},{wa_e},{wa_c},{wa_w},"
+                         f"{ga_e},{ga_c},{ga_w},")
+        type3_fb = "1,1,1,1,1,1,1,1,1,"
+        
+        # type1
+        t1 = tv_total + 480
+        w1 = watch_total + 480
+        g1 = game_total + 480
+        type1_str = f"{t1},{w1},{g1},"
+        type1_fb = "1,1,1,"
+        
+        # type6
+        if quarter == 1:
+            type6_str = "0,0,0,0,0,0,0,0,0,10,11,12,13,13,15,12,14,5,5,2,2,"
+        elif quarter == 2:
+            tp = random.randint(1, 250) * 10000
+            twp = random.randint(200, 450) * 10000
+            tgp = random.randint(450, 850) * 10000
+            type6_str = (f"{tp},{tp},{tp},{twp},{twp},{twp},"
+                         f"{tgp},{tgp},{tgp},10,11,12,13,13,15,12,14,5,5,2,2,")
+        elif quarter == 3:
+            tp = random.randint(1, 45) * 10000
+            twp = random.randint(450, 950) * 10000
+            tgp = random.randint(750, 1150) * 10000
+            type6_str = (f"{tp},{tp},{tp},{twp},{twp},{twp},"
+                         f"{tgp},{tgp},{tgp},10,11,12,13,13,15,12,14,5,5,2,2,")
+        else:
+            tp = random.randint(1, 150) * 10000
+            twp = random.randint(750, 1250) * 10000
+            tgp = random.randint(850, 1150) * 10000
+            type6_str = (f"{tp},{tp},{tp},{twp},{twp},{twp},"
+                         f"{tgp},{tgp},{tgp},10,11,12,13,13,15,12,14,5,5,2,2,")
+        type6_fb = "1,1,1,1,1,1,1,1,1,10,11,12,13,13,15,12,14,5,5,2,2,"
+        
+        # type2
+        if quarter == 1:
+            prods = random.sample(["tv", "watch", "game"], 2)
+            rd_vals = {"tv": random.randint(80, 150) * 10000,
+                       "watch": random.randint(80, 150) * 10000,
+                       "game": random.randint(80, 150) * 10000}
+            rdt = rd_vals.get("tv", 0) if "tv" in prods else 0
+            rdw = rd_vals.get("watch", 0) if "watch" in prods else 0
+            rdg = rd_vals.get("game", 0) if "game" in prods else 0
+        elif quarter == 2:
+            rdt = random.randint(800, 1800) * 10000
+            rdw = random.randint(1200, 3200) * 10000
+            rdg = random.randint(2500, 4200) * 10000
+        elif quarter == 3:
+            rdt = random.randint(1200, 2000) * 10000
+            rdw = random.randint(1200, 2000) * 10000
+            rdg = random.randint(3000, 4200) * 10000
+        else:
+            rdt = random.randint(2700, 3800) * 10000
+            rdw = random.randint(2700, 4500) * 10000
+            rdg = random.randint(3500, 6000) * 10000
+        type2_str = f"{rdt},{rdw},{rdg},100,100,100,"
+        type2_fb = "1,1,1,1,1,1,"
+        
+        # type7
+        type7_str = "9999,9999,9999,7999,7999,7999,9999,9999,9999,"
+        type7_fb = "1,1,1,1,1,1,1,1,1,"
+        
+        # type8
+        type8_str = "1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,"
+        type8_fb = "1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,"
+        
+        return [
+            (4, type4_str),
+            (5, type5_str),
+            (3, type3_str),
+            (1, type1_str),
+            (6, type6_str),
+            (2, type2_str),
+            (7, type7_str),
+            (8, type8_str),
+        ]
 
     def submit_all(self, room_id, period_num, uid=None):
         """所有账号提交全0决策, 返回成功数"""
