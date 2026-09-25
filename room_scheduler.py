@@ -147,7 +147,7 @@ class DecisionClient:
                 return p
         return None
 
-        def submit_decision(self, username, room_id, period_num, uid=None):
+    def submit_decision(self, username, room_id, period_num, uid=None):
         """提交8种决策(type1-8), type8带state=2为最终提交. 返回是否全部成功"""
         if not uid:
             uid = self.get_uid(username)
