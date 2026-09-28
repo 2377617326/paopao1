@@ -203,25 +203,32 @@ class DecisionClient:
         decisions = self._generate_decisions(quarter, n)
         
         ok = True
-        for typ, sval in decisions:
-            p = {
-                "type": str(typ), "periodNum": str(period_num), "num": str(period_num),
-                "companyId": str(user.get("companyId")), "expId": str(user.get("expId")),
-                "userId": str(user.get("userId")), "userName": ck["userName"],
-                "className": ck["className"], "lagOrVersionId": "102", "str": sval,
-            }
-            if typ == 8:
-                p["state"] = "2"
-            try:
-                rr = s.post(f"{BASE_9001}/student/decisionInfo/saveDecisionInfo?"
-                            + urllib.parse.urlencode(p), timeout=self.timeout)
-                if "2000" not in rr.text:
-                    print(f"    [决策] type{typ} 失败: {rr.text[:100]}")
+        for typ, sval, fb in decisions:
+            if not self._post_decision(s, user, ck, period_num, typ, sval):
+                print(f"    [决策] type{typ} 失败, retry all-1s...")
+                if not self._post_decision(s, user, ck, period_num, typ, fb):
                     ok = False
-            except Exception as e:
-                print(f"    [决策] type{typ} 异常: {e}")
-                ok = False
         return ok
+
+    def _post_decision(self, s, user, ck, period_num, typ, decision_str):
+        p = {
+            "type": str(typ), "periodNum": str(period_num), "num": str(period_num),
+            "companyId": str(user.get("companyId")), "expId": str(user.get("expId")),
+            "userId": str(user.get("userId")), "userName": ck["userName"],
+            "className": ck["className"], "lagOrVersionId": "102", "str": decision_str,
+        }
+        if typ == 8:
+            p["state"] = "2"
+        try:
+            rr = s.post(f"{BASE_9001}/student/decisionInfo/saveDecisionInfo?"
+                        + urllib.parse.urlencode(p), timeout=self.timeout)
+            if "2000" in rr.text:
+                return True
+            print(f"    [决策] type{typ} 失败: {rr.text[:100]}")
+            return False
+        except Exception as e:
+            print(f"    [决策] type{typ} 异常: {e}")
+            return False
 
     def _generate_decisions(self, quarter, n):
         """根据季度生成决策列表"""
@@ -358,14 +365,14 @@ class DecisionClient:
         type8_fb = "1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,"
         
         return [
-            (4, type4_str),
-            (5, type5_str),
-            (3, type3_str),
-            (1, type1_str),
-            (6, type6_str),
-            (2, type2_str),
-            (7, type7_str),
-            (8, type8_str),
+            (4, type4_str, type4_fb),
+            (5, type5_str, type5_fb),
+            (3, type3_str, type3_fb),
+            (1, type1_str, type1_fb),
+            (6, type6_str, type6_fb),
+            (2, type2_str, type2_fb),
+            (7, type7_str, type7_fb),
+            (8, type8_str, type8_fb),
         ]
 
     def submit_all(self, room_id, period_num, uid=None):
