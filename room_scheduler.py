@@ -203,12 +203,72 @@ class DecisionClient:
         decisions = self._generate_decisions(quarter, n)
         
         ok = True
+        loaned = False
         for typ, sval, fb in decisions:
-            if not self._post_decision(s, user, ck, period_num, typ, sval):
-                print(f"    [决策] type{typ} 失败, retry all-1s...")
-                if not self._post_decision(s, user, ck, period_num, typ, fb):
-                    ok = False
+            err = self._post_decision(s, user, ck, period_num, typ, sval)
+            if err is None:
+                continue
+            if err in (1006, 3001) and not loaned:
+                if self.apply_loan(s, user, period_num):
+                    loaned = True
+                    err = self._post_decision(s, user, ck, period_num, typ, sval)
+                    if err is None:
+                        continue
+            print(f"    [决策] type{typ} 失败(err={err}), retry all-1s...")
+            err = self._post_decision(s, user, ck, period_num, typ, fb)
+            if err is not None:
+                ok = False
         return ok
+
+    def _err_code(self, r):
+        e = r.get("ErrorNumber")
+        if e:
+            return e
+        d = r.get("Data")
+        if isinstance(d, dict):
+            return d.get("ErrorNumber", 0)
+        return 0
+
+    def apply_loan(self, s, user, period_num):
+        """资金不足(1006/3001)时申请贷款: 本季度还款, 利率4%. 返回是否成功"""
+        try:
+            base = {"companyId": user.get("companyId"), "userId": user.get("userId"),
+                    "classId": user.get("classId"), "periodNum": period_num,
+                    "expId": user.get("expId")}
+            xsrf = s.cookies.get("XSRF-TOKEN")
+            if xsrf:
+                s.headers["X-XSRF-TOKEN"] = xsrf
+            r = s.post(f"{BASE_9001}/student/companyInfo/bankLoan",
+                       params=base, timeout=self.timeout)
+            j = r.json()
+            if j.get("Status") != 2000:
+                print(f"    [贷款] 查询失败: {r.text[:150]}")
+                return False
+            info = j.get("Data") or {}
+            if info.get("drNoFinish") == 0:
+                print("    [贷款] drNoFinish=0, 本季不可贷款")
+                return False
+            max_loan = info.get("maxLoanMoney")
+            if not max_loan or float(max_loan) <= 0:
+                print("    [贷款] 可贷额度为0")
+                return False
+            if info.get("loanLi"):
+                print("    [贷款] 已有贷款记录, 跳过")
+                return False
+            lp = dict(base)
+            lp.update({"loanMoney": max_loan, "selPeriodNum": 0,
+                       "maxLoan": max_loan, "className": user.get("className")})
+            r2 = s.post(f"{BASE_9001}/student/companyInfo/saveLoan",
+                        params=lp, timeout=self.timeout)
+            j2 = r2.json()
+            if j2.get("Status") == 2000:
+                print(f"    [贷款] 成功! 金额={max_loan} (本季度还款, 利率4%)")
+                return True
+            print(f"    [贷款] 申请失败: {r2.text[:200]}")
+            return False
+        except Exception as e:
+            print(f"    [贷款] 异常: {e}")
+            return False
 
     def _post_decision(self, s, user, ck, period_num, typ, decision_str):
         p = {
@@ -223,12 +283,18 @@ class DecisionClient:
             rr = s.post(f"{BASE_9001}/student/decisionInfo/saveDecisionInfo?"
                         + urllib.parse.urlencode(p), timeout=self.timeout)
             if "2000" in rr.text:
-                return True
-            print(f"    [决策] type{typ} 失败: {rr.text[:100]}")
-            return False
+                return None
+            err = -1
+            try:
+                j = rr.json()
+                err = self._err_code(j) or -1
+            except Exception:
+                pass
+            print(f"    [决策] type{typ} 失败(err={err}): {rr.text[:100]}")
+            return err
         except Exception as e:
             print(f"    [决策] type{typ} 异常: {e}")
-            return False
+            return -1
 
     def _generate_decisions(self, quarter, n):
         """根据季度生成决策列表"""
