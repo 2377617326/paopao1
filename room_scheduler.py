@@ -252,8 +252,9 @@ class DecisionClient:
             if not max_loan or float(max_loan) <= 0:
                 print("    [贷款] 可贷额度为0")
                 return False
-            if info.get("loanLi"):
-                print("    [贷款] 已有贷款记录, 跳过")
+            leader = info.get("leaderValue")
+            if leader not in (1, 10, "1", "10"):
+                print(f"    [贷款] 非负责人(leaderValue={leader}), 跳过")
                 return False
             lp = dict(base)
             lp.update({"loanMoney": max_loan, "selPeriodNum": 0,
