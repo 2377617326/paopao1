@@ -203,14 +203,14 @@ class DecisionClient:
         decisions = self._generate_decisions(quarter, n)
         
         ok = True
-        loaned = False
+        loan_tried = False
         for typ, sval, fb in decisions:
             err = self._post_decision(s, user, ck, period_num, typ, sval)
             if err is None:
                 continue
-            if err in (1006, 3001) and not loaned:
+            if err in (1006, 3001) and not loan_tried:
+                loan_tried = True
                 if self.apply_loan(s, user, period_num):
-                    loaned = True
                     err = self._post_decision(s, user, ck, period_num, typ, sval)
                     if err is None:
                         continue
