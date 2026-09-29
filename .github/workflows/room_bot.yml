@@ -26,18 +26,41 @@ jobs:
         run: pip install requests
 
       - name: Run scheduler
+        id: run-scheduler
         env:
-          BOT_USER: ${{ secrets.BOT_USER }}
-          BOT_PASS: ${{ secrets.BOT_PASS }}
-        run: python room_scheduler.py --login "$BOT_USER" "$BOT_PASS"
+          BOT_USER: ${{{{ secrets.BOT_USER }}}}
+          BOT_PASS: ${{{{ secrets.BOT_PASS }}}}
+        run: |
+          set +e
+          python room_scheduler.py --login "$BOT_USER" "$BOT_PASS"
+          ec=$?
+          set -e
+          echo "scheduler_exit=$ec" >> "$GITHUB_OUTPUT"
+          restart=yes
+          if [ "$ec" -eq 75 ] || [ "$ec" -eq 78 ]; then restart=no; fi
+          echo "restart=$restart" >> "$GITHUB_OUTPUT"
+          if [ "$ec" -eq 75 ]; then
+            echo "::error::login failed (exit 75), no restart"
+            exit 1
+          fi
+          if [ "$ec" -ne 0 ] && [ "$ec" -ne 78 ]; then
+            exit "$ec"
+          fi
+          exit 0
 
       - name: Auto restart
-        if: always()
+        if: always() && steps.run-scheduler.outputs.restart == 'yes'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           HOUR_BJ=$(TZ=Asia/Shanghai date +%H)
-          echo "BJ time ${HOUR_BJ}:00, restart in 30s..."
-          sleep 30
-          curl -s -X POST             -H "Authorization: token $GH_TOKEN"             -H "Accept: application/vnd.github.v3+json"             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/room_bot.yml/dispatches"             -d '"'"'{"ref":"main"}'"'"'
-          echo "triggered"
+          if [ "$HOUR_BJ" -ge 6 ] || [ "$HOUR_BJ" -le 1 ]; then
+            echo "BJ time ${HOUR_BJ}:00, restart in 30s..."
+            sleep 30
+            code=$(curl -sS -o /tmp/dispatch_body -w '%{http_code}' -X POST -H "Authorization: token $GH_TOKEN" -H "Accept: application/vnd.github.v3+json" "https://api.github.com/repos/${{ github.repository }}/actions/workflows/room_bot.yml/dispatches" -d '{"ref":"main"}')
+            cat /tmp/dispatch_body; echo ""
+            if [ "$code" != "204" ]; then echo "::error::dispatch failed HTTP $code"; exit 1; fi
+            echo "triggered"
+          else
+            echo "BJ time ${HOUR_BJ}:00, off hours, skip restart"
+          fi
