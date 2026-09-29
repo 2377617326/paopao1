@@ -750,10 +750,16 @@ class Scheduler:
         if wait_sec > 0:
             print(f"  [等待] 房号{room_id} [{room_name}] 开赛{target_time.strftime('%H:%M')}, 等{wait_sec/60:.0f}分钟", flush=True)
             while self._now() < target_time:
+                if self._time_left() < 600:
+                    print("  [等待] 接近job时限, 交下个job继续等待", flush=True)
+                    return False
                 time.sleep(min(30, max(1, wait_sec)))
                 wait_sec = (target_time - self._now()).total_seconds()
         print(f"  [强制] 到点, 强制开始", flush=True)
         while True:
+            if self._time_left() < 600:
+                print("  [强制] 接近job时限, 交下个job接管开赛", flush=True)
+                return False
             self.start_exp(room_id, room_level)
             time.sleep(5)
             if self.is_room_started(room_id, room_level):
@@ -763,8 +769,8 @@ class Scheduler:
             if players is None:
                 print("  [结束] 房间已解散", flush=True)
                 return False
-            print(f"  [重试] 未开始(人数{players}/{maxp}), 10s后重试...", flush=True)
-            time.sleep(10)
+            print(f"  [重试] 未开始(人数{players}/{maxp}), 5s后重试...", flush=True)
+            time.sleep(5)
 
     def _get_current_period(self, room_id, dc):
         """从9001登录获取当前期数, 用于重启后恢复"""
@@ -803,6 +809,8 @@ class Scheduler:
                 time.sleep(30)
 
         no_flip_count = 0
+        wait_started = time.time()
+        period_anchor = None
         while current_period < TOTAL_PERIOD:
             if self._time_left() < 600:
                 print("  [翻期] 接近job时限, 退出交给下个job", flush=True)
@@ -810,10 +818,25 @@ class Scheduler:
             if self.is_room_finished(room_id, room_level):
                 print("  [翻期] 房间已结束, 停止", flush=True)
                 return True
+            # 锚点=上次翻期时刻+20min, 提前12s开始高频轮询, 保证准点翻期
+            if period_anchor is not None:
+                while True:
+                    remain = period_anchor + PERIOD_LENGTH * 60 - time.time()
+                    if remain <= 12:
+                        break
+                    if self._time_left() < 600:
+                        print("  [翻期] 接近job时限, 退出交给下个job", flush=True)
+                        return False
+                    if self.is_room_finished(room_id, room_level):
+                        print("  [翻期] 房间已结束, 停止", flush=True)
+                        return True
+                    time.sleep(min(10, max(1, remain - 11)))
             resp = self.next_period(room_id, room_level)
             if resp == "1":
                 current_period += 1
                 no_flip_count = 0
+                period_anchor = time.time()
+                wait_started = time.time()
                 print(f"  [翻期] 翻期成功! 进入第{current_period}期", flush=True)
                 if dc:
                     print(f"  [决策] 提交第{current_period}期决策...", flush=True)
@@ -827,22 +850,37 @@ class Scheduler:
                     return True
             else:
                 no_flip_count += 1
-                print(f"  [翻期] 返回{resp}, 30s后重试...", flush=True)
-                time.sleep(30)
-                if no_flip_count >= 20:
+                if no_flip_count == 1 or no_flip_count % 30 == 0:
+                    print(f"  [翻期] 返回{resp}, 重试中... ({no_flip_count})", flush=True)
+                time.sleep(2 if period_anchor is not None else 5)
+                # 仅超过本期20min+60s后才尝试结束房间, 绝不在期内提前结束
+                if time.time() - wait_started >= PERIOD_LENGTH * 60 + 60 and no_flip_count >= 3:
                     print("  [结束] 长时间无法翻期, 尝试结束房间...", flush=True)
                     resp2 = self.finish_exp(room_id, room_level)
                     if resp2 == "1" or self.is_room_finished(room_id, room_level):
                         print("  [结束] 房间已结束!", flush=True)
                         return True
+                    wait_started = time.time()
                     no_flip_count = 0
 
-        # 第4期决策已提交, 结束房间
-        print("  [结束] 4期决策已全部提交, 结束房间...", flush=True)
+        # 第4期决策已提交: 等到本期满20min(锚点前12s)后高频尝试结束, 准点结束
+        print("  [结束] 4期决策已全部提交, 等待本期20min结束点...", flush=True)
+        finish_started = False
         while True:
             if self._time_left() < 600:
                 print("  [结束] 接近job时限, 退出交给下个job", flush=True)
                 return False
+            if self.is_room_finished(room_id, room_level):
+                print("  [结束] 房间已结束!", flush=True)
+                return True
+            if period_anchor is not None:
+                remain = period_anchor + PERIOD_LENGTH * 60 - 12 - time.time()
+                if remain > 0:
+                    time.sleep(min(10, max(1, remain)))
+                    continue
+            if not finish_started:
+                print("  [结束] 到点, 高频尝试结束...", flush=True)
+                finish_started = True
             resp = self.finish_exp(room_id, room_level)
             if resp == "1":
                 print("  [结束] 实验已结束!", flush=True)
@@ -850,8 +888,9 @@ class Scheduler:
             if self.is_room_finished(room_id, room_level):
                 print("  [结束] 房间已结束!", flush=True)
                 return True
-            print(f"  [结束] 返回{resp}, 30s后重试...", flush=True)
-            time.sleep(30)
+            if int(time.time()) % 30 < 3:
+                print(f"  [结束] 返回{resp}, 继续尝试...", flush=True)
+            time.sleep(2 if period_anchor is not None else 5)
 
     def handle_room(self, room_id, room_level):
         """处理一个房间的完整生命周期(开始->翻期->结束).
@@ -884,11 +923,17 @@ class Scheduler:
             if wait_sec > 0:
                 print(f"  [接管] 房间名[{room_name}] 开赛时间{target_time.strftime('%H:%M')}, 等待{wait_sec/60:.0f}分钟", flush=True)
                 while self._now() < target_time:
+                    if self._time_left() < 600:
+                        print("  [接管] 接近job时限, 交下个job继续等待", flush=True)
+                        return False
                     time.sleep(min(30, max(1, wait_sec)))
                     wait_sec = (target_time - self._now()).total_seconds()
             # 等待结束, 开始循环start_exp
             print(f"  [接管] 到点, 循环尝试start_exp", flush=True)
             while True:
+                if self._time_left() < 600:
+                    print("  [接管] 接近job时限, 交下个job接管开赛", flush=True)
+                    return False
                 self.start_exp(room_id, room_level)
                 time.sleep(5)
                 if self.is_room_started(room_id, room_level):
@@ -898,8 +943,8 @@ class Scheduler:
                 if players2 is None:
                     print("  [结束] 房间已解散", flush=True)
                     return False
-                print(f"  [重试] 未开始(人数{players2}), 15s后重试...", flush=True)
-                time.sleep(10)
+                print(f"  [重试] 未开始(人数{players2}), 5s后重试...", flush=True)
+                time.sleep(5)
         dc = DecisionClient(self.timeout)
         self.flip_loop(room_id, room_level, dc=dc)
         return True
@@ -975,12 +1020,17 @@ class Scheduler:
             if not ok:
                 # 建房失败, 可能已有活跃房间, 先检查
                 own = self.find_own_rooms()
+                handled = False
                 if own:
                     print(f"  [建房] 失败但发现 {len(own)} 个已有房间, 接管处理", flush=True)
                     for lv, rid in own.items():
                         if not self.is_room_finished(rid, lv):
                             self.handle_room(rid, lv)
+                            handled = True
                             break
+                    if not handled:
+                        print("  [建房] 已有房间均已结束, 20s后重试", flush=True)
+                        time.sleep(20)
                     continue
                 print("  [建房] 失败且无已有房间, 2分钟后重试", flush=True)
                 time.sleep(120)
