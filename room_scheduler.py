@@ -979,11 +979,11 @@ class Scheduler:
                             break
                     else:
                         print("所有房间已结束, 收工", flush=True)
-                        return True
+                        return None
                     continue
                 else:
                     print("无标记房间, 收工", flush=True)
-                    return True
+                    return None
 
             primary, secondary = plan
             print(f"  计划: 主{LEVELS[primary]['name']} 次{LEVELS[secondary]['name']}", flush=True)
@@ -1108,7 +1108,13 @@ def main():
             if ok:
                 sched.handle_room(room_id, room_level)
     else:
-        sched.run(dry_run=args.dry_run)
+        ok = sched.run(dry_run=args.dry_run)
+        if ok is False:
+            print("[退出] 登录失败, 不自动重启 (exit 75)", flush=True)
+            sys.exit(75)
+        if ok is None:
+            print("[退出] 收工, 不自动重启 (exit 78)", flush=True)
+            sys.exit(78)
 
 
 if __name__ == "__main__":
