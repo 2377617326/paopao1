@@ -112,6 +112,14 @@ ALL_ACCOUNTS = [
 ]
 
 
+ZERO_DECISIONS = {
+    4: "0,0,0,0,0,0,0,0,0,0,0,0,",
+    3: "0,0,0,0,0,0,0,0,0,",
+    6: "0,0,0,0,0,0,0,0,0,10,11,12,13,13,15,12,14,5,5,2,2,",
+    2: "0,0,0,0,0,0,",
+}
+
+
 class DecisionClient:
     """9001 决策软件客户端: 登录 + 提交全0决策"""
 
@@ -216,8 +224,17 @@ class DecisionClient:
                         continue
             print(f"    [决策] type{typ} 失败(err={err}), retry all-1s...")
             err = self._post_decision(s, user, ck, period_num, typ, fb)
-            if err is not None:
-                ok = False
+            if err is None:
+                continue
+            z = ZERO_DECISIONS.get(typ)
+            if z:
+                print(f"    [决策] type{typ} all-1s失败(err={err}), 尝试破产零支出...")
+                err = self._post_decision(s, user, ck, period_num, typ, z)
+                if err is None:
+                    print(f"    [决策] type{typ} 零支出提交成功")
+                    continue
+            print(f"    [决策] type{typ} 三轮均失败(err={err})")
+            ok = False
         return ok
 
     def _err_code(self, r):
@@ -807,6 +824,8 @@ class Scheduler:
                     break
                 print(f"  [决策] 第{current_period}期提交失败, 30s后重试({attempt+1}/3)", flush=True)
                 time.sleep(30)
+            else:
+                print(f"  [决策] [WARN] 第{current_period}期3次重试后仍未全部提交, 继续翻期", flush=True)
 
         no_flip_count = 0
         wait_started = time.time()
@@ -845,6 +864,8 @@ class Scheduler:
                             break
                         print(f"  [决策] 第{current_period}期提交失败, 30s后重试({attempt+1}/3)", flush=True)
                         time.sleep(30)
+                    else:
+                        print(f"  [决策] [WARN] 第{current_period}期3次重试后仍未全部提交, 继续翻期", flush=True)
                 if self.is_room_finished(room_id, room_level):
                     print("  [翻期] 翻期后房间已结束, 停止", flush=True)
                     return True
